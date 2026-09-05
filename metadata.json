@@ -1,0 +1,6 @@
+{
+  "name": "DLMS Audio",
+  "description": "Digital Loudspeaker Management System (DLMS) dengan pemutar YouTube, 31-Band Equalizer L/R, crossover HPF/LPF, delay alignment, visualizer spektrum real-time, dan preset audio.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
