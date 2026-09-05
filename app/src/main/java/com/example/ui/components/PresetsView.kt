@@ -23,9 +23,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,20 +40,25 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.AudioPresetEntity
 import com.example.data.model.formatFrequency
+import com.example.util.AppUpdateManager
+import kotlinx.coroutines.launch
 import com.example.ui.theme.AudioAmber
 import com.example.ui.theme.AudioCyan
 import com.example.ui.theme.AudioCyanDark
@@ -77,6 +86,11 @@ fun PresetsView(
     var showSaveDialog by remember { mutableStateOf(false) }
     var newPresetName by remember { mutableStateOf("") }
     var newPresetDesc by remember { mutableStateOf("") }
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val updateState by AppUpdateManager.updateState.collectAsState()
+    var showUpdateDialog by remember { mutableStateOf(false) }
 
     Surface(
         modifier = modifier
@@ -136,6 +150,133 @@ fun PresetsView(
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // FITUR UPDATE APLIKASI TERBARU (IN-APP UPDATER)
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF1E1C24),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4A4458)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("app_update_card")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (updateState.isUpdateAvailable) AudioGreen else Color(0xFF381E72)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (updateState.isUpdateAvailable) Icons.Default.Download else Icons.Default.SystemUpdate,
+                                contentDescription = "App Update",
+                                tint = if (updateState.isUpdateAvailable) Color.Black else AudioCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "VERSI APLIKASI",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextMuted,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFF2B2930)
+                                ) {
+                                    Text(
+                                        text = "v${AppUpdateManager.getCurrentVersionName()}",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AudioCyan,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = if (updateState.isDownloading) {
+                                    "Mengunduh APK baru..."
+                                } else if (updateState.isChecking) {
+                                    "Memeriksa pembaruan..."
+                                } else if (updateState.isUpdateAvailable) {
+                                    "Versi Baru v${updateState.latestVersionName} Tersedia!"
+                                } else {
+                                    "Aplikasi Sudah Versi Terbaru"
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (updateState.isUpdateAvailable) AudioGreen else TextPrimary
+                            )
+                        }
+                    }
+
+                    // Tombol Aksi Update / Cek Update
+                    if (updateState.isChecking || updateState.isDownloading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = AudioCyan,
+                            strokeWidth = 2.dp
+                        )
+                    } else if (updateState.isUpdateAvailable) {
+                        Button(
+                            onClick = {
+                                AppUpdateManager.startDownloadAndInstall(context, updateState.downloadUrl)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AudioGreen),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                text = "UPDATE",
+                                color = Color.Black,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 11.sp
+                            )
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    AppUpdateManager.checkForUpdates(context)
+                                    showUpdateDialog = true
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, AudioCyan.copy(alpha = 0.7f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AudioCyan)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Check",
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "CEK UPDATE",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
 
@@ -233,6 +374,122 @@ fun PresetsView(
             dismissButton = {
                 TextButton(onClick = { showSaveDialog = false }) {
                     Text("Batal", color = TextSecondary)
+                }
+            },
+            containerColor = Color(0xFF2B2930),
+            shape = RoundedCornerShape(24.dp)
+        )
+    }
+
+    // App Update Status / Download Dialog
+    if (showUpdateDialog) {
+        AlertDialog(
+            onDismissRequest = { showUpdateDialog = false },
+            icon = {
+                Icon(
+                    imageVector = if (updateState.isUpdateAvailable) Icons.Default.Download else Icons.Default.SystemUpdate,
+                    contentDescription = "Update Status",
+                    tint = if (updateState.isUpdateAvailable) AudioGreen else AudioCyan,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = if (updateState.isChecking) {
+                        "Memeriksa Pembaruan..."
+                    } else if (updateState.isUpdateAvailable) {
+                        "Pembaruan Tersedia (v${updateState.latestVersionName})"
+                    } else {
+                        "Aplikasi Sudah Terbaru (v${AppUpdateManager.getCurrentVersionName()})"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (updateState.isChecking) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = AudioCyan,
+                                strokeWidth = 2.dp
+                            )
+                            Text(
+                                text = "Menghubungi server rilis...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary
+                            )
+                        }
+                    } else if (updateState.isUpdateAvailable) {
+                        Text(
+                            text = "Versi baru siap dipasang langsung tanpa menghapus data atau settingan yang sudah ada.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary
+                        )
+                        if (updateState.releaseNotes.isNotBlank()) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF1C1B1F),
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                            ) {
+                                Text(
+                                    text = updateState.releaseNotes,
+                                    fontSize = 11.sp,
+                                    color = TextMuted,
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "Anda sedang menjalankan versi v${AppUpdateManager.getCurrentVersionName()} (Build ${AppUpdateManager.getCurrentVersionCode()}). Tidak ada pembaruan baru saat ini.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary
+                        )
+                    }
+
+                    if (updateState.errorMessage != null) {
+                        Text(
+                            text = updateState.errorMessage ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AudioAmber
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                if (updateState.isUpdateAvailable) {
+                    Button(
+                        onClick = {
+                            AppUpdateManager.startDownloadAndInstall(context, updateState.downloadUrl)
+                            showUpdateDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AudioGreen),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text("UPDATE SEKARANG", color = Color.Black, fontWeight = FontWeight.ExtraBold)
+                    }
+                } else {
+                    Button(
+                        onClick = { showUpdateDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = AudioCyan),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text("TUTUP", color = Color(0xFF381E72), fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                if (updateState.isUpdateAvailable) {
+                    TextButton(onClick = { showUpdateDialog = false }) {
+                        Text("Nanti Saja", color = TextSecondary)
+                    }
                 }
             },
             containerColor = Color(0xFF2B2930),
