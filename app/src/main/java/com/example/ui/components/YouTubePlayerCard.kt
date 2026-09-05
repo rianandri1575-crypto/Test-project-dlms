@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -178,6 +179,25 @@ fun YouTubePlayerCard(
                         }
                     } else {
                         IconButton(
+                            onClick = {
+                                if (isPlaying) {
+                                    webViewRef?.evaluateJavascript("if (player && player.pauseVideo) player.pauseVideo();", null)
+                                    onTogglePlay(false)
+                                } else {
+                                    webViewRef?.evaluateJavascript("if (player && player.playVideo) player.playVideo();", null)
+                                    onTogglePlay(true)
+                                }
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (isPlaying) "Pause Audio" else "Play Audio",
+                                tint = if (isPlaying) AudioGreen else AudioCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        IconButton(
                             onClick = { webViewRef?.reload() },
                             modifier = Modifier.size(32.dp)
                         ) {
@@ -240,6 +260,7 @@ fun YouTubePlayerCard(
                             )
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
+                            settings.databaseEnabled = true
                             settings.mediaPlaybackRequiresUserGesture = false
                             settings.cacheMode = WebSettings.LOAD_DEFAULT
                             webViewClient = WebViewClient()
@@ -320,12 +341,36 @@ fun YouTubePlayerCard(
                             )
                         }
                     }
-                    Text(
-                        text = "TAB PLAYER ➔",
-                        color = AudioCyan,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        IconButton(
+                            onClick = {
+                                if (isPlaying) {
+                                    webViewRef?.evaluateJavascript("if (player && player.pauseVideo) player.pauseVideo();", null)
+                                    onTogglePlay(false)
+                                } else {
+                                    webViewRef?.evaluateJavascript("if (player && player.playVideo) player.playVideo();", null)
+                                    onTogglePlay(true)
+                                }
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                tint = if (isPlaying) AudioGreen else AudioCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Text(
+                            text = "TAB PLAYER ➔",
+                            color = AudioCyan,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             } else {
                 Spacer(modifier = Modifier.height(10.dp))
@@ -471,10 +516,11 @@ private fun buildYouTubeHtml(videoId: String): String {
         <!DOCTYPE html>
         <html>
         <head>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
           <style>
-            body { margin: 0; padding: 0; background: #000; overflow: hidden; }
-            #player { width: 100vw; height: 100vh; }
+            * { box-sizing: border-box; }
+            html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+            #player { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
           </style>
           <script src="https://www.youtube.com/iframe_api"></script>
         </head>
@@ -492,8 +538,11 @@ private fun buildYouTubeHtml(videoId: String): String {
                   'playsinline': 1,
                   'controls': 1,
                   'enablejsapi': 1,
+                  'origin': 'https://www.youtube.com',
+                  'widget_referrer': 'https://www.youtube.com',
                   'rel': 0,
-                  'fs': 1
+                  'fs': 1,
+                  'iv_load_policy': 3
                 },
                 events: {
                   'onReady': function(e) {
@@ -504,16 +553,22 @@ private fun buildYouTubeHtml(videoId: String): String {
                   },
                   'onStateChange': function(e) {
                     if (window.DlmsBridge) window.DlmsBridge.onPlayerState(e.data);
+                  },
+                  'onError': function(e) {
+                    console.log("YT Player Error:", e.data);
+                    if (window.DlmsBridge) window.DlmsBridge.onPlayerState(2);
                   }
                 }
               });
             }
 
             setInterval(function() {
-              if (player && player.getPlayerState && player.getPlayerState() === 1) {
-                var t = player.getCurrentTime() || 0;
-                if (window.DlmsBridge) window.DlmsBridge.onTimeTick(t);
-              }
+              try {
+                if (player && player.getPlayerState && player.getPlayerState() === 1) {
+                  var t = player.getCurrentTime() || 0;
+                  if (window.DlmsBridge) window.DlmsBridge.onTimeTick(t);
+                }
+              } catch(err){}
             }, 35);
           </script>
         </body>
