@@ -1,6 +1,8 @@
 package com.example.ui.components
 
 import android.annotation.SuppressLint
+import android.content.Intent
+import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -61,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -145,6 +148,7 @@ fun YouTubePlayerCard(
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var isSearchActiveInWebView by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
 
     // Helper to execute search or load video directly
     val executeSearchOrLoad: (String) -> Unit = { query ->
@@ -156,7 +160,7 @@ fun YouTubePlayerCard(
                 isSearchActiveInWebView = false
                 onTrackSelected(extractedId, "YouTube ($extractedId)")
                 val html = buildYouTubeHtml(extractedId)
-                webViewRef?.loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+                webViewRef?.loadDataWithBaseURL("https://www.youtube-nocookie.com", html, "text/html", "UTF-8", null)
             } else {
                 // In-App Search: Load YouTube mobile search results directly into the player
                 isSearchActiveInWebView = true
@@ -271,7 +275,7 @@ fun YouTubePlayerCard(
                             onClick = {
                                 isSearchActiveInWebView = false
                                 val html = buildYouTubeHtml(currentVideoId)
-                                webViewRef?.loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+                                webViewRef?.loadDataWithBaseURL("https://www.youtube-nocookie.com", html, "text/html", "UTF-8", null)
                             },
                             modifier = Modifier.size(32.dp)
                         ) {
@@ -358,12 +362,22 @@ fun YouTubePlayerCard(
                             webViewClient = object : WebViewClient() {
                                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                     val url = request?.url?.toString() ?: return false
+                                    // Handle non-http schemes such as intent://, vnd.youtube://, market://
+                                    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                                        try {
+                                            val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                                            if (intent != null) {
+                                                context.startActivity(intent)
+                                            }
+                                        } catch (_: Exception) {}
+                                        return true
+                                    }
                                     val detectedId = extractYouTubeId(url)
                                     if (detectedId != null) {
                                         isSearchActiveInWebView = false
                                         onTrackSelected(detectedId, "YouTube Audio ($detectedId)")
                                         val html = buildYouTubeHtml(detectedId)
-                                        view?.loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+                                        view?.loadDataWithBaseURL("https://www.youtube-nocookie.com", html, "text/html", "UTF-8", null)
                                         return true
                                     }
                                     return false
@@ -393,12 +407,12 @@ fun YouTubePlayerCard(
                                     onTick = { time ->
                                         onTimeTick(time)
                                     }
-                                ),
+                                 ),
                                 "DlmsBridge"
                             )
 
                             val html = buildYouTubeHtml(currentVideoId)
-                            loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+                            loadDataWithBaseURL("https://www.youtube-nocookie.com", html, "text/html", "UTF-8", null)
                             webViewRef = this
                         }
                     },
@@ -406,7 +420,7 @@ fun YouTubePlayerCard(
                         if (!isSearchActiveInWebView && webView.tag != currentVideoId) {
                             webView.tag = currentVideoId
                             val html = buildYouTubeHtml(currentVideoId)
-                            webView.loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+                            webView.loadDataWithBaseURL("https://www.youtube-nocookie.com", html, "text/html", "UTF-8", null)
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -645,24 +659,60 @@ fun YouTubePlayerCard(
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    if (isSearchActiveInWebView) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (isSearchActiveInWebView) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = AudioCyan.copy(alpha = 0.2f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, AudioCyan),
+                                modifier = Modifier.clickable {
+                                    isSearchActiveInWebView = false
+                                    val html = buildYouTubeHtml(currentVideoId)
+                                    webViewRef?.loadDataWithBaseURL("https://www.youtube-nocookie.com", html, "text/html", "UTF-8", null)
+                                }
+                            ) {
+                                Text(
+                                    text = "KEMBALI KE PLAYER",
+                                    fontSize = 9.sp,
+                                    color = AudioCyan,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = AudioCyan.copy(alpha = 0.2f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, AudioCyan),
+                            color = Color(0xFFC4302B).copy(alpha = 0.25f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE53935).copy(alpha = 0.7f)),
                             modifier = Modifier.clickable {
-                                isSearchActiveInWebView = false
-                                val html = buildYouTubeHtml(currentVideoId)
-                                webViewRef?.loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+                                try {
+                                    val appIntent = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$currentVideoId"))
+                                    context.startActivity(appIntent)
+                                } catch (_: Exception) {
+                                    val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$currentVideoId"))
+                                    context.startActivity(webIntent)
+                                }
                             }
                         ) {
-                            Text(
-                                text = "KEMBALI KE PLAYER",
-                                fontSize = 9.sp,
-                                color = AudioCyan,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.OpenInNew,
+                                    contentDescription = "Buka YouTube",
+                                    tint = Color(0xFFFF8A80),
+                                    modifier = Modifier.size(10.dp)
+                                )
+                                Text(
+                                    text = "BUKA YOUTUBE",
+                                    fontSize = 9.sp,
+                                    color = Color(0xFFFF8A80),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
@@ -688,7 +738,7 @@ fun YouTubePlayerCard(
                                 isSearchActiveInWebView = false
                                 onTrackSelected(track.id, track.title)
                                 val html = buildYouTubeHtml(track.id)
-                                webViewRef?.loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+                                webViewRef?.loadDataWithBaseURL("https://www.youtube-nocookie.com", html, "text/html", "UTF-8", null)
                             }
                         ) {
                             Row(
@@ -814,6 +864,7 @@ private fun buildYouTubeHtml(videoId: String): String {
         <html>
         <head>
           <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+          <meta name="referrer" content="strict-origin-when-cross-origin">
           <style>
             * { box-sizing: border-box; }
             html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
@@ -846,13 +897,14 @@ private fun buildYouTubeHtml(videoId: String): String {
                 height: '100%',
                 width: '100%',
                 videoId: '$videoId',
+                host: 'https://www.youtube-nocookie.com',
                 playerVars: {
                   'autoplay': 1,
                   'playsinline': 1,
                   'controls': 1,
                   'enablejsapi': 1,
-                  'origin': 'https://www.youtube.com',
-                  'widget_referrer': 'https://www.youtube.com',
+                  'origin': 'https://www.youtube-nocookie.com',
+                  'widget_referrer': 'https://www.youtube-nocookie.com',
                   'rel': 0,
                   'fs': 1,
                   'iv_load_policy': 3
