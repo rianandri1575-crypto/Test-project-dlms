@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,8 +28,6 @@ import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.VolumeMute
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -51,10 +50,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,10 +61,8 @@ import com.example.ui.components.PresetsView
 import com.example.ui.components.RealTimeSpectrumVisualizer
 import com.example.ui.components.StereoVuMeter
 import com.example.ui.components.YouTubePlayerCard
-import com.example.ui.theme.AudioAmber
 import com.example.ui.theme.AudioCyan
 import com.example.ui.theme.AudioGreen
-import com.example.ui.theme.AudioRed
 import com.example.ui.theme.HighDensityBg
 import com.example.ui.theme.HighDensityBorder
 import com.example.ui.theme.HighDensityCard
@@ -80,10 +74,7 @@ import com.example.ui.theme.HighDensityYouTubeRed
 import com.example.ui.theme.RackBackground
 import com.example.ui.theme.RackBorder
 import com.example.ui.theme.RackCard
-import com.example.ui.theme.RackCardHighlight
-import com.example.ui.theme.RackSurface
 import com.example.ui.theme.TextMuted
-import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 
@@ -164,7 +155,7 @@ fun DlmsApp(
                 .background(HighDensityBg)
                 .statusBarsPadding()
         ) {
-            // TOP HIGH DENSITY HEADER
+            // TOP HIGH DENSITY HEADER WITH WATERMARK "DEV by Yanns45hz"
             HighDensityHeader(
                 currentTitle = uiState.currentYouTubeTitle,
                 isYouTubePlaying = uiState.isYouTubePlaying,
@@ -190,7 +181,7 @@ fun DlmsApp(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
 
-                // 1. PINNED REAL-TIME RTA SPECTRUM VISUALIZER (Requirement 7)
+                // 1. PINNED REAL-TIME RTA SPECTRUM VISUALIZER
                 RealTimeSpectrumVisualizer(
                     levels = spectrumLevels,
                     peakLevels = peakLevels,
@@ -206,30 +197,78 @@ fun DlmsApp(
                     isMutedR = uiState.channelR.isMuted
                 )
 
-                // 3. TAB CONTENT
+                // 3. PERSISTENT YOUTUBE PLAYER & DSP GENERATOR
+                // Kept permanently composed so when switching tabs to adjust EQ / Crossover,
+                // audio playback in the WebView is NEVER interrupted!
+                YouTubePlayerCard(
+                    currentVideoId = uiState.currentYouTubeVideoId,
+                    currentTitle = uiState.currentYouTubeTitle,
+                    isPlaying = uiState.isYouTubePlaying,
+                    isSignalPlaying = uiState.isSignalGeneratorPlaying,
+                    signalType = uiState.signalGeneratorType,
+                    isMiniMode = (selectedTab != 0),
+                    onExpandVideo = { selectedTab = 0 },
+                    onTrackSelected = { id, title ->
+                        viewModel.selectYouTubeTrack(id, title)
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Memutar track: $title")
+                        }
+                    },
+                    onPlaybackStateChanged = { state ->
+                        viewModel.onYouTubePlayerStateChanged(state)
+                    },
+                    onTimeTick = { timeSec ->
+                        viewModel.onYouTubeTimeTick(timeSec)
+                    },
+                    onTogglePlay = { viewModel.setYouTubePlaying(it) },
+                    onToggleSignal = { viewModel.toggleSignalGenerator(it) },
+                    onStopSignal = { viewModel.stopSignalGenerator() }
+                )
+
+                // 4. TAB CONTENT
                 when (selectedTab) {
                     0 -> {
-                        // YouTube Player & DSP Generator (Requirement 1)
-                        YouTubePlayerCard(
-                            currentVideoId = uiState.currentYouTubeVideoId,
-                            currentTitle = uiState.currentYouTubeTitle,
-                            isPlaying = uiState.isYouTubePlaying,
-                            isSignalPlaying = uiState.isSignalGeneratorPlaying,
-                            signalType = uiState.signalGeneratorType,
-                            onTrackSelected = { id, title ->
-                                viewModel.selectYouTubeTrack(id, title)
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("Memutar track: $title")
+                        // In Player tab, display information card below the player
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .border(1.dp, RackBorder.copy(alpha = 0.5f), RoundedCornerShape(16.dp)),
+                            color = RackCard
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Equalizer,
+                                        contentDescription = "DSP Active",
+                                        tint = AudioCyan,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "DLMS LIVE DSP PROCESSING ACTIVE",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AudioCyan,
+                                        fontSize = 10.sp
+                                    )
                                 }
-                            },
-                            onTogglePlay = { viewModel.setYouTubePlaying(it) },
-                            onToggleSignal = { viewModel.toggleSignalGenerator(it) },
-                            onStopSignal = { viewModel.stopSignalGenerator() }
-                        )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Lagu akan terus berputar di background saat Anda berpindah ke tab 31-Band Equalizer, Crossover L/R, Delay & Align, atau Preset. Atur parameter audio secara langsung sambil mendengarkan musik.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary,
+                                    fontSize = 11.sp,
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
                     }
 
                     1 -> {
-                        // 31-Band Equalizer for Output L & R (Requirement 4)
+                        // 31-Band Equalizer for Output L & R
                         Equalizer31BandView(
                             activeChannel = uiState.activeChannel,
                             channelL = uiState.channelL,
@@ -254,15 +293,30 @@ fun DlmsApp(
                     }
 
                     2 -> {
-                        // Crossover High-Pass & Low-Pass Filters (Requirement 6)
+                        // Crossover High-Pass & Low-Pass Filters with Output L and R
                         CrossoverView(
-                            crossover = uiState.crossover,
+                            crossoverChannel = uiState.crossoverChannel,
+                            crossoverL = uiState.crossoverL,
+                            crossoverR = uiState.crossoverR,
+                            onSelectChannel = { viewModel.setCrossoverChannel(it) },
                             onHpfEnabledChange = { viewModel.setHpfEnabled(it) },
                             onHpfFrequencyChange = { viewModel.setHpfFrequency(it) },
                             onHpfSlopeChange = { viewModel.setHpfSlope(it) },
                             onLpfEnabledChange = { viewModel.setLpfEnabled(it) },
                             onLpfFrequencyChange = { viewModel.setLpfFrequency(it) },
-                            onLpfSlopeChange = { viewModel.setLpfSlope(it) }
+                            onLpfSlopeChange = { viewModel.setLpfSlope(it) },
+                            onCopyLtoR = {
+                                viewModel.copyCrossoverLtoR()
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Pengaturan Crossover OUT L disalin ke OUT R")
+                                }
+                            },
+                            onCopyRtoL = {
+                                viewModel.copyCrossoverRtoL()
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Pengaturan Crossover OUT R disalin ke OUT L")
+                                }
+                            }
                         )
                     }
 
@@ -279,7 +333,7 @@ fun DlmsApp(
                     }
 
                     4 -> {
-                        // Preset Management (Requirement 5)
+                        // Preset Management
                         PresetsView(
                             presets = presets,
                             currentPresetName = uiState.currentPresetName,
@@ -325,93 +379,141 @@ fun HighDensityHeader(
         modifier = modifier.fillMaxWidth(),
         color = HighDensityBg
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Left: YouTube Red rounded badge + Now Playing status
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Watermark Bar at the top of the main screen: "DEV by Yanns45hz"
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.weight(1f, fill = false)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF141218))
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(HighDensityYouTubeRed),
-                    contentAlignment = Alignment.Center
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Playback Icon",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(AudioCyan)
+                    )
+                    Text(
+                        text = "DLMS SOUND MANAGEMENT",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextMuted,
+                        letterSpacing = 0.8.sp
                     )
                 }
 
-                Column {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF381E72),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AudioCyan.copy(alpha = 0.6f))
+                ) {
                     Text(
-                        text = if (isYouTubePlaying) "NOW PLAYING YOUTUBE" else if (isSignalPlaying) "DSP TONE GENERATOR" else "DLMS AUDIO DSP",
+                        text = "DEV by Yanns45hz",
                         style = MaterialTheme.typography.labelSmall,
-                        color = HighDensityLavender,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp,
-                        fontSize = 10.sp
-                    )
-                    Text(
-                        text = if (currentTitle.isNotBlank()) currentTitle else "Preset: $currentPresetName",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = HighDensityTextPrimary,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        modifier = Modifier.widthIn(max = 160.dp)
+                        fontWeight = FontWeight.ExtraBold,
+                        color = AudioCyan,
+                        fontSize = 10.sp,
+                        letterSpacing = 0.6.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                     )
                 }
             }
 
-            // Right: High Density Save preset icon + Reset Flat pill
+            // High-density Quick Controls Row
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Circular Save Button (w-10 h-10 rounded-full bg-[#49454F])
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(HighDensityBorder)
-                        .clickable(onClick = onQuickSave),
-                    contentAlignment = Alignment.Center
+                // Left: YouTube Red rounded badge + Now Playing status
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f, fill = false)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Save,
-                        contentDescription = "Save Preset",
-                        tint = HighDensityLavender,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(HighDensityYouTubeRed),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Playback Icon",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = if (isYouTubePlaying) "NOW PLAYING YOUTUBE" else if (isSignalPlaying) "DSP TONE GENERATOR" else "DLMS AUDIO DSP",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = HighDensityLavender,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp,
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = if (currentTitle.isNotBlank()) currentTitle else "Preset: $currentPresetName",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = HighDensityTextPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            modifier = Modifier.widthIn(max = 160.dp)
+                        )
+                    }
                 }
 
-                // Reset Flat Pill Button (px-4 h-10 rounded-full bg-[#D0BCFF] text-[#381E72])
-                Box(
-                    modifier = Modifier
-                        .height(40.dp)
-                        .clip(CircleShape)
-                        .background(HighDensityLavender)
-                        .clickable(onClick = onResetFlat)
-                        .padding(horizontal = 14.dp),
-                    contentAlignment = Alignment.Center
+                // Right: High Density Save preset icon + Reset Flat pill
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "RESET FLAT",
-                        color = HighDensityOnLavender,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
-                        letterSpacing = 0.5.sp
-                    )
+                    // Circular Save Button
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(HighDensityBorder)
+                            .clickable(onClick = onQuickSave),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Save,
+                            contentDescription = "Save Preset",
+                            tint = HighDensityLavender,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    // Reset Flat Pill Button
+                    Box(
+                        modifier = Modifier
+                            .height(40.dp)
+                            .clip(CircleShape)
+                            .background(HighDensityLavender)
+                            .clickable(onClick = onResetFlat)
+                            .padding(horizontal = 14.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "RESET FLAT",
+                            color = HighDensityOnLavender,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
                 }
             }
         }

@@ -19,9 +19,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCut
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -44,6 +41,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.ChannelSelect
 import com.example.data.model.CrossoverSettings
 import com.example.data.model.CrossoverSlope
 import com.example.data.model.formatFrequency
@@ -51,10 +49,8 @@ import com.example.ui.theme.AudioAmber
 import com.example.ui.theme.AudioCyan
 import com.example.ui.theme.AudioGreen
 import com.example.ui.theme.AudioRed
-import com.example.ui.theme.FaderTrack
 import com.example.ui.theme.RackBorder
 import com.example.ui.theme.RackCard
-import com.example.ui.theme.RackCardHighlight
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
@@ -63,15 +59,32 @@ import kotlin.math.pow
 
 @Composable
 fun CrossoverView(
-    crossover: CrossoverSettings,
+    crossoverChannel: ChannelSelect,
+    crossoverL: CrossoverSettings,
+    crossoverR: CrossoverSettings,
+    onSelectChannel: (ChannelSelect) -> Unit,
     onHpfEnabledChange: (Boolean) -> Unit,
     onHpfFrequencyChange: (Float) -> Unit,
     onHpfSlopeChange: (CrossoverSlope) -> Unit,
     onLpfEnabledChange: (Boolean) -> Unit,
     onLpfFrequencyChange: (Float) -> Unit,
     onLpfSlopeChange: (CrossoverSlope) -> Unit,
+    onCopyLtoR: () -> Unit = {},
+    onCopyRtoL: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val currentCrossover = when (crossoverChannel) {
+        ChannelSelect.LEFT -> crossoverL
+        ChannelSelect.RIGHT -> crossoverR
+        ChannelSelect.LINKED -> crossoverL
+    }
+
+    val activeColor = when (crossoverChannel) {
+        ChannelSelect.LEFT -> AudioCyan
+        ChannelSelect.RIGHT -> AudioAmber
+        ChannelSelect.LINKED -> AudioGreen
+    }
+
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -98,7 +111,7 @@ fun CrossoverView(
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = "CROSSOVER FILTERS (HPF / LPF)",
+                        text = "CROSSOVER FILTERS (OUTPUT L & R)",
                         style = MaterialTheme.typography.labelSmall,
                         color = AudioCyan,
                         letterSpacing = 0.8.sp,
@@ -107,24 +120,71 @@ fun CrossoverView(
                     )
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = if (crossover.hpfEnabled || crossover.lpfEnabled) "FILTERS ACTIVE" else "BYPASSED",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (crossover.hpfEnabled || crossover.lpfEnabled) AudioGreen else TextMuted,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                Text(
+                    text = if (currentCrossover.hpfEnabled || currentCrossover.lpfEnabled) "DSP ACTIVE" else "BYPASS",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (currentCrossover.hpfEnabled || currentCrossover.lpfEnabled) AudioGreen else TextMuted,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Channel Selector Tabs: [OUTPUT L] [OUTPUT R] [LINKED (L+R)]
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF1C1B1F))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                ChannelSelect.values().forEach { channel ->
+                    val isSelected = crossoverChannel == channel
+                    val tabColor = when (channel) {
+                        ChannelSelect.LEFT -> AudioCyan
+                        ChannelSelect.RIGHT -> AudioAmber
+                        ChannelSelect.LINKED -> AudioGreen
+                    }
+                    val label = when (channel) {
+                        ChannelSelect.LEFT -> "OUTPUT L"
+                        ChannelSelect.RIGHT -> "OUTPUT R"
+                        ChannelSelect.LINKED -> "LINKED (L+R)"
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isSelected) tabColor.copy(alpha = 0.25f) else Color.Transparent)
+                            .border(
+                                1.dp,
+                                if (isSelected) tabColor else Color.Transparent,
+                                RoundedCornerShape(10.dp)
+                            )
+                            .clickable { onSelectChannel(channel) }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isSelected) tabColor else TextSecondary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Crossover Transfer Curve Visualizer
+            // Dual Output Crossover Visualizer (L = Cyan, R = Amber)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(100.dp)
+                    .height(108.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(Color(0xFF1C1B1F))
                     .border(1.dp, RackBorder.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
@@ -133,7 +193,7 @@ fun CrossoverView(
                     val w = size.width
                     val h = size.height
 
-                    // dB reference lines
+                    // Grid lines
                     drawLine(Color(0x22FFFFFF), Offset(0f, h * 0.2f), Offset(w, h * 0.2f), 1f) // 0 dB
                     drawLine(Color(0x15FFFFFF), Offset(0f, h * 0.5f), Offset(w, h * 0.5f), 1f) // -12 dB
                     drawLine(Color(0x15FFFFFF), Offset(0f, h * 0.8f), Offset(w, h * 0.8f), 1f) // -24 dB
@@ -142,64 +202,68 @@ fun CrossoverView(
                     val maxFreq = 20000f
                     val logMin = log10(minFreq)
                     val logMax = log10(maxFreq)
-
-                    val path = Path()
                     val steps = 80
 
-                    for (step in 0..steps) {
-                        val fraction = step / steps.toFloat()
-                        val currentLog = logMin + fraction * (logMax - logMin)
-                        val freq = 10.0.pow(currentLog.toDouble()).toFloat()
+                    fun drawCrossoverCurve(settings: CrossoverSettings, strokeColor: Color, strokeWidth: Float) {
+                        val path = Path()
+                        for (step in 0..steps) {
+                            val fraction = step / steps.toFloat()
+                            val currentLog = logMin + fraction * (logMax - logMin)
+                            val freq = 10.0.pow(currentLog.toDouble()).toFloat()
 
-                        var gainDb = 0f
-
-                        // HPF response
-                        if (crossover.hpfEnabled && crossover.hpfSlope != CrossoverSlope.BYPASS) {
-                            if (freq < crossover.hpfFrequency) {
-                                val octaves = (log10(crossover.hpfFrequency / freq) / log10(2.0)).toFloat()
-                                gainDb -= octaves * crossover.hpfSlope.rollOffDb
+                            var gainDb = 0f
+                            if (settings.hpfEnabled && settings.hpfSlope != CrossoverSlope.BYPASS) {
+                                if (freq < settings.hpfFrequency) {
+                                    val octaves = (log10(settings.hpfFrequency / freq) / log10(2.0)).toFloat()
+                                    gainDb -= octaves * settings.hpfSlope.rollOffDb
+                                }
                             }
+                            if (settings.lpfEnabled && settings.lpfSlope != CrossoverSlope.BYPASS) {
+                                if (freq > settings.lpfFrequency) {
+                                    val octaves = (log10(freq / settings.lpfFrequency) / log10(2.0)).toFloat()
+                                    gainDb -= octaves * settings.lpfSlope.rollOffDb
+                                }
+                            }
+
+                            val clampedDb = gainDb.coerceIn(-36f, 0f)
+                            val y = (h * 0.2f) + ((0f - clampedDb) / 36f) * (h * 0.75f)
+                            val x = fraction * w
+
+                            if (step == 0) path.moveTo(x, y) else path.lineTo(x, y)
                         }
 
-                        // LPF response
-                        if (crossover.lpfEnabled && crossover.lpfSlope != CrossoverSlope.BYPASS) {
-                            if (freq > crossover.lpfFrequency) {
-                                val octaves = (log10(freq / crossover.lpfFrequency) / log10(2.0)).toFloat()
-                                gainDb -= octaves * crossover.lpfSlope.rollOffDb
-                            }
+                        drawPath(
+                            path = path,
+                            color = strokeColor,
+                            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                        )
+                    }
+
+                    when (crossoverChannel) {
+                        ChannelSelect.LEFT -> {
+                            drawCrossoverCurve(crossoverR, AudioAmber.copy(alpha = 0.35f), 2f)
+                            drawCrossoverCurve(crossoverL, AudioCyan, 3.5f)
                         }
-
-                        // Map gainDb (-36 to 0 dB) to (h to h*0.2f)
-                        val clampedDb = gainDb.coerceIn(-36f, 0f)
-                        val y = (h * 0.2f) + ((0f - clampedDb) / 36f) * (h * 0.75f)
-                        val x = fraction * w
-
-                        if (step == 0) {
-                            path.moveTo(x, y)
-                        } else {
-                            path.lineTo(x, y)
+                        ChannelSelect.RIGHT -> {
+                            drawCrossoverCurve(crossoverL, AudioCyan.copy(alpha = 0.35f), 2f)
+                            drawCrossoverCurve(crossoverR, AudioAmber, 3.5f)
+                        }
+                        ChannelSelect.LINKED -> {
+                            drawCrossoverCurve(crossoverL, AudioGreen, 3.5f)
                         }
                     }
 
-                    drawPath(
-                        path = path,
-                        color = AudioAmber,
-                        style = Stroke(width = 3.5f, cap = StrokeCap.Round)
-                    )
-
-                    // Draw HPF marker
-                    if (crossover.hpfEnabled && crossover.hpfSlope != CrossoverSlope.BYPASS) {
-                        val hpfFrac = ((log10(crossover.hpfFrequency) - logMin) / (logMax - logMin)).coerceIn(0f, 1f)
+                    // Markers for active selection
+                    if (currentCrossover.hpfEnabled && currentCrossover.hpfSlope != CrossoverSlope.BYPASS) {
+                        val hpfFrac = ((log10(currentCrossover.hpfFrequency) - logMin) / (logMax - logMin)).coerceIn(0f, 1f)
                         drawCircle(
                             color = AudioGreen,
                             radius = 5f,
                             center = Offset(hpfFrac * w, h * 0.2f)
                         )
                     }
-
-                    // Draw LPF marker
-                    if (crossover.lpfEnabled && crossover.lpfSlope != CrossoverSlope.BYPASS) {
-                        val lpfFrac = ((log10(crossover.lpfFrequency) - logMin) / (logMax - logMin)).coerceIn(0f, 1f)
+                    if (currentCrossover.lpfEnabled && currentCrossover.lpfSlope != CrossoverSlope.BYPASS) {
+                        val lpfFrac = ((log10(currentCrossover.lpfFrequency) - logMin) / (logMax - logMin)).coerceIn(0f, 1f)
                         drawCircle(
                             color = AudioCyan,
                             radius = 5f,
@@ -207,18 +271,95 @@ fun CrossoverView(
                         )
                     }
                 }
+
+                // Legend inside visualizer
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(AudioCyan))
+                        Text(
+                            text = "OUT L (${formatFrequency(crossoverL.hpfFrequency)}-${formatFrequency(crossoverL.lpfFrequency)}Hz)",
+                            color = AudioCyan,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(AudioAmber))
+                        Text(
+                            text = "OUT R (${formatFrequency(crossoverR.hpfFrequency)}-${formatFrequency(crossoverR.lpfFrequency)}Hz)",
+                            color = AudioAmber,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Quick Copy Channels Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF2B2930))
+                        .border(1.dp, RackBorder.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                        .clickable(onClick = onCopyLtoR)
+                        .padding(vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "COPY OUT-L ➔ OUT-R",
+                        color = AudioCyan,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF2B2930))
+                        .border(1.dp, RackBorder.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                        .clickable(onClick = onCopyRtoL)
+                        .padding(vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "COPY OUT-R ➔ OUT-L",
+                        color = AudioAmber,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             // HIGH-PASS FILTER (HPF) SECTION
             FilterControlCard(
-                title = "HIGH-PASS FILTER (HPF / LOW-CUT)",
-                subtitle = "Memotong frekuensi sub yang merusak speaker woofer",
+                title = "HIGH-PASS FILTER (HPF / LOW-CUT) - $crossoverChannel",
+                subtitle = "Memotong frekuensi sub woofer untuk proteksi driver speaker",
                 accentColor = AudioGreen,
-                isEnabled = crossover.hpfEnabled,
-                frequency = crossover.hpfFrequency,
-                selectedSlope = crossover.hpfSlope,
+                isEnabled = currentCrossover.hpfEnabled,
+                frequency = currentCrossover.hpfFrequency,
+                selectedSlope = currentCrossover.hpfSlope,
                 minFreq = 20f,
                 maxFreq = 2000f,
                 onEnabledChange = onHpfEnabledChange,
@@ -236,12 +377,12 @@ fun CrossoverView(
 
             // LOW-PASS FILTER (LPF) SECTION
             FilterControlCard(
-                title = "LOW-PASS FILTER (LPF / HIGH-CUT)",
-                subtitle = "Memotong frekuensi atas untuk subwoofer atau mid-bass",
-                accentColor = AudioCyan,
-                isEnabled = crossover.lpfEnabled,
-                frequency = crossover.lpfFrequency,
-                selectedSlope = crossover.lpfSlope,
+                title = "LOW-PASS FILTER (LPF / HIGH-CUT) - $crossoverChannel",
+                subtitle = "Memotong frekuensi atas untuk subwoofer atau speaker mid-bass",
+                accentColor = activeColor,
+                isEnabled = currentCrossover.lpfEnabled,
+                frequency = currentCrossover.lpfFrequency,
+                selectedSlope = currentCrossover.lpfSlope,
                 minFreq = 60f,
                 maxFreq = 20000f,
                 onEnabledChange = onLpfEnabledChange,
@@ -289,7 +430,7 @@ fun FilterControlCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = title,
                         style = MaterialTheme.typography.labelMedium,
@@ -333,7 +474,6 @@ fun FilterControlCard(
                     fontSize = 11.sp
                 )
 
-                // Logarithmic frequency slider representation
                 val logMin = log10(minFreq)
                 val logMax = log10(maxFreq)
                 val currentLog = log10(frequency.coerceIn(minFreq, maxFreq))
@@ -368,7 +508,7 @@ fun FilterControlCard(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Filter Slope Type Selection (High Density Pills)
+            // Filter Slope Type Selection
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,

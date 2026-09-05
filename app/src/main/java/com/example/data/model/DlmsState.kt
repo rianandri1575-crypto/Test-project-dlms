@@ -57,6 +57,9 @@ data class CrossoverSettings(
 data class DlmsUiState(
     val channelL: ChannelAudioSettings = ChannelAudioSettings(),
     val channelR: ChannelAudioSettings = ChannelAudioSettings(),
+    val crossoverL: CrossoverSettings = CrossoverSettings(),
+    val crossoverR: CrossoverSettings = CrossoverSettings(),
+    val crossoverChannel: ChannelSelect = ChannelSelect.LINKED,
     val crossover: CrossoverSettings = CrossoverSettings(),
     val activeChannel: ChannelSelect = ChannelSelect.LINKED,
     val masterGainDb: Float = 0f,

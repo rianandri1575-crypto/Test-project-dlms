@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.AudioSignalGenerator
+import com.example.audio.AudioSpectrumAnalyzer
 import com.example.data.db.AppDatabase
 import com.example.data.db.AudioPresetEntity
 import com.example.data.model.ChannelAudioSettings
@@ -25,8 +26,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Random
+import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.log10
 import kotlin.math.pow
+import kotlin.math.sin
 
 class DlmsViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -34,6 +38,18 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = PresetRepository(database.audioPresetDao())
     private val signalGenerator = AudioSignalGenerator()
     private val random = Random()
+
+    private var spectrumAnalyzer: AudioSpectrumAnalyzer? = null
+    @Volatile
+    private var lastHardwareFft: FloatArray? = null
+    @Volatile
+    private var lastHardwareVuL: Float? = null
+    @Volatile
+    private var lastHardwareVuR: Float? = null
+    @Volatile
+    private var lastFftTimestamp = 0L
+    @Volatile
+    private var youTubePlayheadTime = 0.0
 
     private val _uiState = MutableStateFlow(DlmsUiState())
     val uiState: StateFlow<DlmsUiState> = _uiState.asStateFlow()
@@ -46,11 +62,11 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
         )
 
     // Real-time RTA 31-band levels (normalized 0.0f to 1.0f)
-    private val _spectrumLevels = MutableStateFlow(List(31) { 0.05f })
+    private val _spectrumLevels = MutableStateFlow(List(31) { 0.0f })
     val spectrumLevels: StateFlow<List<Float>> = _spectrumLevels.asStateFlow()
 
     // Peak hold levels
-    private val _peakLevels = MutableStateFlow(List(31) { 0.05f })
+    private val _peakLevels = MutableStateFlow(List(31) { 0.0f })
     val peakLevels: StateFlow<List<Float>> = _peakLevels.asStateFlow()
 
     // Real-time VU Meters for Output L & R (-60 dB to +6 dB scale)
@@ -64,12 +80,33 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.ensureDefaultPresets()
         }
+        initHardwareAnalyzer(application)
         startSpectrumAnimationLoop()
+    }
+
+    private fun initHardwareAnalyzer(app: Application) {
+        spectrumAnalyzer = AudioSpectrumAnalyzer(
+            context = app,
+            onFftUpdate = { bands ->
+                lastHardwareFft = bands
+                lastFftTimestamp = System.currentTimeMillis()
+            },
+            onVuUpdate = { dbL, dbR ->
+                lastHardwareVuL = dbL
+                lastHardwareVuR = dbR
+            }
+        )
+        spectrumAnalyzer?.start()
+    }
+
+    fun startHardwareVisualizer() {
+        spectrumAnalyzer?.start()
     }
 
     override fun onCleared() {
         super.onCleared()
         signalGenerator.stop()
+        spectrumAnalyzer?.stop()
     }
 
     // --- Channel & EQ Controls ---
@@ -192,47 +229,157 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- Crossover Controls ---
+    // --- Crossover Controls with Output L / Output R / LINKED ---
 
-    fun setHpfEnabled(enabled: Boolean) {
+    fun setCrossoverChannel(channel: ChannelSelect) {
+        _uiState.update { it.copy(crossoverChannel = channel) }
+    }
+
+    fun setHpfEnabled(enabled: Boolean, targetChannel: ChannelSelect? = null) {
+        val channel = targetChannel ?: _uiState.value.crossoverChannel
         _uiState.update { state ->
-            state.copy(crossover = state.crossover.copy(hpfEnabled = enabled))
+            when (channel) {
+                ChannelSelect.LEFT -> state.copy(
+                    crossoverL = state.crossoverL.copy(hpfEnabled = enabled),
+                    crossover = state.crossover.copy(hpfEnabled = enabled)
+                )
+                ChannelSelect.RIGHT -> state.copy(
+                    crossoverR = state.crossoverR.copy(hpfEnabled = enabled)
+                )
+                ChannelSelect.LINKED -> state.copy(
+                    crossoverL = state.crossoverL.copy(hpfEnabled = enabled),
+                    crossoverR = state.crossoverR.copy(hpfEnabled = enabled),
+                    crossover = state.crossover.copy(hpfEnabled = enabled)
+                )
+            }
         }
     }
 
-    fun setHpfFrequency(freq: Float) {
+    fun setHpfFrequency(freq: Float, targetChannel: ChannelSelect? = null) {
         val clamped = freq.coerceIn(20f, 10000f)
+        val channel = targetChannel ?: _uiState.value.crossoverChannel
         _uiState.update { state ->
-            state.copy(crossover = state.crossover.copy(hpfFrequency = clamped))
+            when (channel) {
+                ChannelSelect.LEFT -> state.copy(
+                    crossoverL = state.crossoverL.copy(hpfFrequency = clamped),
+                    crossover = state.crossover.copy(hpfFrequency = clamped)
+                )
+                ChannelSelect.RIGHT -> state.copy(
+                    crossoverR = state.crossoverR.copy(hpfFrequency = clamped)
+                )
+                ChannelSelect.LINKED -> state.copy(
+                    crossoverL = state.crossoverL.copy(hpfFrequency = clamped),
+                    crossoverR = state.crossoverR.copy(hpfFrequency = clamped),
+                    crossover = state.crossover.copy(hpfFrequency = clamped)
+                )
+            }
         }
     }
 
-    fun setHpfSlope(slope: CrossoverSlope) {
+    fun setHpfSlope(slope: CrossoverSlope, targetChannel: ChannelSelect? = null) {
+        val channel = targetChannel ?: _uiState.value.crossoverChannel
         _uiState.update { state ->
-            state.copy(crossover = state.crossover.copy(hpfSlope = slope))
+            when (channel) {
+                ChannelSelect.LEFT -> state.copy(
+                    crossoverL = state.crossoverL.copy(hpfSlope = slope),
+                    crossover = state.crossover.copy(hpfSlope = slope)
+                )
+                ChannelSelect.RIGHT -> state.copy(
+                    crossoverR = state.crossoverR.copy(hpfSlope = slope)
+                )
+                ChannelSelect.LINKED -> state.copy(
+                    crossoverL = state.crossoverL.copy(hpfSlope = slope),
+                    crossoverR = state.crossoverR.copy(hpfSlope = slope),
+                    crossover = state.crossover.copy(hpfSlope = slope)
+                )
+            }
         }
     }
 
-    fun setLpfEnabled(enabled: Boolean) {
+    fun setLpfEnabled(enabled: Boolean, targetChannel: ChannelSelect? = null) {
+        val channel = targetChannel ?: _uiState.value.crossoverChannel
         _uiState.update { state ->
-            state.copy(crossover = state.crossover.copy(lpfEnabled = enabled))
+            when (channel) {
+                ChannelSelect.LEFT -> state.copy(
+                    crossoverL = state.crossoverL.copy(lpfEnabled = enabled),
+                    crossover = state.crossover.copy(lpfEnabled = enabled)
+                )
+                ChannelSelect.RIGHT -> state.copy(
+                    crossoverR = state.crossoverR.copy(lpfEnabled = enabled)
+                )
+                ChannelSelect.LINKED -> state.copy(
+                    crossoverL = state.crossoverL.copy(lpfEnabled = enabled),
+                    crossoverR = state.crossoverR.copy(lpfEnabled = enabled),
+                    crossover = state.crossover.copy(lpfEnabled = enabled)
+                )
+            }
         }
     }
 
-    fun setLpfFrequency(freq: Float) {
+    fun setLpfFrequency(freq: Float, targetChannel: ChannelSelect? = null) {
         val clamped = freq.coerceIn(100f, 20000f)
+        val channel = targetChannel ?: _uiState.value.crossoverChannel
         _uiState.update { state ->
-            state.copy(crossover = state.crossover.copy(lpfFrequency = clamped))
+            when (channel) {
+                ChannelSelect.LEFT -> state.copy(
+                    crossoverL = state.crossoverL.copy(lpfFrequency = clamped),
+                    crossover = state.crossover.copy(lpfFrequency = clamped)
+                )
+                ChannelSelect.RIGHT -> state.copy(
+                    crossoverR = state.crossoverR.copy(lpfFrequency = clamped)
+                )
+                ChannelSelect.LINKED -> state.copy(
+                    crossoverL = state.crossoverL.copy(lpfFrequency = clamped),
+                    crossoverR = state.crossoverR.copy(lpfFrequency = clamped),
+                    crossover = state.crossover.copy(lpfFrequency = clamped)
+                )
+            }
         }
     }
 
-    fun setLpfSlope(slope: CrossoverSlope) {
+    fun setLpfSlope(slope: CrossoverSlope, targetChannel: ChannelSelect? = null) {
+        val channel = targetChannel ?: _uiState.value.crossoverChannel
         _uiState.update { state ->
-            state.copy(crossover = state.crossover.copy(lpfSlope = slope))
+            when (channel) {
+                ChannelSelect.LEFT -> state.copy(
+                    crossoverL = state.crossoverL.copy(lpfSlope = slope),
+                    crossover = state.crossover.copy(lpfSlope = slope)
+                )
+                ChannelSelect.RIGHT -> state.copy(
+                    crossoverR = state.crossoverR.copy(lpfSlope = slope)
+                )
+                ChannelSelect.LINKED -> state.copy(
+                    crossoverL = state.crossoverL.copy(lpfSlope = slope),
+                    crossoverR = state.crossoverR.copy(lpfSlope = slope),
+                    crossover = state.crossover.copy(lpfSlope = slope)
+                )
+            }
+        }
+    }
+
+    fun copyCrossoverLtoR() {
+        _uiState.update { state ->
+            state.copy(crossoverR = state.crossoverL)
+        }
+    }
+
+    fun copyCrossoverRtoL() {
+        _uiState.update { state ->
+            state.copy(crossoverL = state.crossoverR)
         }
     }
 
     // --- YouTube & Signal Player ---
+
+    fun onYouTubePlayerStateChanged(state: Int) {
+        // YT.PlayerState: 1 = PLAYING, 2 = PAUSED, 0 = ENDED, 3 = BUFFERING
+        val isPlaying = (state == 1)
+        setYouTubePlaying(isPlaying)
+    }
+
+    fun onYouTubeTimeTick(currentTimeSeconds: Double) {
+        youTubePlayheadTime = currentTimeSeconds
+    }
 
     fun setYouTubePlaying(playing: Boolean) {
         _uiState.update { it.copy(isYouTubePlaying = playing) }
@@ -366,16 +513,17 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startSpectrumAnimationLoop() {
         viewModelScope.launch(Dispatchers.Default) {
-            var step = 0f
-            val currentLevels = FloatArray(31) { 0.05f }
-            val currentPeaks = FloatArray(31) { 0.05f }
+            var simStep = 0.0
+            val currentLevels = FloatArray(31) { 0.0f }
+            val currentPeaks = FloatArray(31) { 0.0f }
             val peakHoldCounters = IntArray(31) { 0 }
 
             while (isActive) {
-                step += 0.25f
+                simStep += 0.04
                 val state = _uiState.value
                 val isPlaying = state.isYouTubePlaying || state.isSignalGeneratorPlaying
-                val isMutedBoth = state.channelL.isMuted && state.channelR.isMuted
+                val isHardwareActive = (System.currentTimeMillis() - lastFftTimestamp) < 400 && lastHardwareFft != null
+                val hwFft = lastHardwareFft
 
                 // Base energy profiles
                 val activeEqGains = when (state.activeChannel) {
@@ -384,8 +532,29 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
                     ChannelSelect.LINKED -> state.channelL.eqGains.zip(state.channelR.eqGains) { l, r -> (l + r) / 2f }
                 }
 
-                val avgGainDb = if (isMutedBoth) -60f else maxOf(state.channelL.gainDb, state.channelR.gainDb)
-                val gainMultiplier = if (isMutedBoth) 0.001f else 10f.pow(avgGainDb / 20f).coerceIn(0.05f, 2.5f)
+                val activeCrossover = when (state.crossoverChannel) {
+                    ChannelSelect.LEFT -> state.crossoverL
+                    ChannelSelect.RIGHT -> state.crossoverR
+                    ChannelSelect.LINKED -> state.crossoverL // default linked
+                }
+
+                val avgGainDb = if (state.channelL.isMuted && state.channelR.isMuted) -60f else maxOf(state.channelL.gainDb, state.channelR.gainDb)
+                val gainMultiplier = if (state.channelL.isMuted && state.channelR.isMuted) 0f else 10f.pow(avgGainDb / 20f).coerceIn(0.05f, 2.5f)
+
+                if (!isPlaying) {
+                    // Truly silence and decay when music is stopped/paused
+                    for (i in 0 until 31) {
+                        currentLevels[i] = (currentLevels[i] * 0.70f).coerceAtLeast(0f)
+                        currentPeaks[i] = (currentPeaks[i] * 0.80f).coerceAtLeast(0f)
+                        peakHoldCounters[i] = 0
+                    }
+                    _spectrumLevels.value = currentLevels.toList()
+                    _peakLevels.value = currentPeaks.toList()
+                    _vuLevelL.value = -60f
+                    _vuLevelR.value = -60f
+                    delay(35)
+                    continue
+                }
 
                 for (i in 0 until 31) {
                     val freq = ISO_31_FREQUENCIES[i]
@@ -393,83 +562,94 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
 
                     // Calculate Crossover attenuation at this frequency
                     var crossoverAttenuationDb = 0f
-                    if (state.crossover.hpfEnabled && state.crossover.hpfSlope != CrossoverSlope.BYPASS) {
-                        if (freq < state.crossover.hpfFrequency) {
-                            val octavesBelow = (log10(state.crossover.hpfFrequency / freq) / log10(2.0)).toFloat()
-                            crossoverAttenuationDb -= octavesBelow * state.crossover.hpfSlope.rollOffDb
+                    if (activeCrossover.hpfEnabled && activeCrossover.hpfSlope != CrossoverSlope.BYPASS) {
+                        if (freq < activeCrossover.hpfFrequency) {
+                            val octavesBelow = (log10(activeCrossover.hpfFrequency / freq) / log10(2.0)).toFloat()
+                            crossoverAttenuationDb -= octavesBelow * activeCrossover.hpfSlope.rollOffDb
                         }
                     }
-                    if (state.crossover.lpfEnabled && state.crossover.lpfSlope != CrossoverSlope.BYPASS) {
-                        if (freq > state.crossover.lpfFrequency) {
-                            val octavesAbove = (log10(freq / state.crossover.lpfFrequency) / log10(2.0)).toFloat()
-                            crossoverAttenuationDb -= octavesAbove * state.crossover.lpfSlope.rollOffDb
+                    if (activeCrossover.lpfEnabled && activeCrossover.lpfSlope != CrossoverSlope.BYPASS) {
+                        if (freq > activeCrossover.lpfFrequency) {
+                            val octavesAbove = (log10(freq / activeCrossover.lpfFrequency) / log10(2.0)).toFloat()
+                            crossoverAttenuationDb -= octavesAbove * activeCrossover.lpfSlope.rollOffDb
                         }
                     }
 
-                    // Combined filter factor in linear scale
+                    // Filter factor in linear scale
                     val totalDb = (eqGain + crossoverAttenuationDb).coerceIn(-48f, 15f)
                     val filterFactor = 10f.pow(totalDb / 20f)
 
-                    val targetLevel: Float = if (!isPlaying) {
-                        // Ambient low floor
-                        (0.04f + random.nextFloat() * 0.03f) * filterFactor
+                    val targetLevel: Float = if (isHardwareActive && hwFft != null) {
+                        // LIVE HARDWARE AUDIO ANALYSIS
+                        val rawFft = hwFft.getOrElse(i) { 0f }
+                        (rawFft * filterFactor * gainMultiplier).coerceIn(0.0f, 1.0f)
                     } else if (state.isSignalGeneratorPlaying) {
-                        // Specific generator signatures
+                        // DSP Hardware generator signatures
                         when (state.signalGeneratorType) {
-                            SignalType.SINE_1KHZ -> {
-                                if (i in 16..18) 0.88f * filterFactor else 0.04f * filterFactor
-                            }
-                            SignalType.SINE_40HZ -> {
-                                if (i in 2..4) 0.92f * filterFactor else 0.03f * filterFactor
-                            }
-                            SignalType.SINE_100HZ -> {
-                                if (i in 6..8) 0.90f * filterFactor else 0.04f * filterFactor
-                            }
+                            SignalType.SINE_1KHZ -> if (i in 16..18) 0.90f * filterFactor else 0.02f
+                            SignalType.SINE_40HZ -> if (i in 2..4) 0.94f * filterFactor else 0.02f
+                            SignalType.SINE_100HZ -> if (i in 6..8) 0.92f * filterFactor else 0.02f
                             SignalType.PINK_NOISE -> {
-                                // -3dB/octave slope pink noise energy
                                 val pinkWeight = (1.0f / (freq.toDouble().pow(0.2))).toFloat() * 1.5f
                                 (0.35f * pinkWeight + (random.nextFloat() * 0.12f)) * filterFactor
                             }
                             SignalType.SWEEP_20_20K -> {
-                                val activeIdx = ((step * 1.2f).toInt() % 31)
-                                val dist = kotlin.math.abs(i - activeIdx)
+                                val activeIdx = ((simStep * 5.0).toInt() % 31)
+                                val dist = abs(i - activeIdx)
                                 if (dist == 0) 0.95f * filterFactor
-                                else if (dist == 1) 0.5f * filterFactor
-                                else 0.03f * filterFactor
+                                else if (dist == 1) 0.45f * filterFactor
+                                else 0.02f
                             }
                         }
                     } else {
-                        // YouTube music dynamics: musical rhythm spectrum (sub bass punch, vocal mid energy, shimmer)
-                        val rhythmBass = (kotlin.math.sin(step * 0.8 + i * 0.2).toFloat() * 0.5f + 0.5f)
-                        val rhythmMid = (kotlin.math.cos(step * 1.3 + i * 0.4).toFloat() * 0.5f + 0.5f)
-                        val rhythmTreble = (kotlin.math.sin(step * 1.7 + i * 0.6).toFloat() * 0.5f + 0.5f)
+                        // REALISTIC MUSICAL DYNAMICS synced to playhead
+                        val t = if (youTubePlayheadTime > 0.0) youTubePlayheadTime else simStep
+                        val beatBpm = 126.0
+                        val beatPos = (t * (beatBpm / 60.0))
+                        val beatFraction = (beatPos % 1.0)
+
+                        // Transient punch (kick on beat, snare on 2 & 4)
+                        val isKick = (beatFraction < 0.22)
+                        val kickIntensity = if (isKick) (1.0 - beatFraction / 0.22).toFloat() else 0f
+
+                        val isSnare = ((beatPos % 2.0) in 1.0..1.25)
+                        val snareIntensity = if (isSnare) (1.0 - ((beatPos % 2.0) - 1.0) / 0.25).toFloat() else 0f
+
+                        // 16th note hi-hat ticks
+                        val hatPos = (beatPos * 4.0 % 1.0)
+                        val hatIntensity = if (hatPos < 0.3) (1.0 - hatPos / 0.3).toFloat() else 0.1f
+
+                        val bassEnergy = 0.35f + kickIntensity * 0.55f + (sin(t * 4.0 + i).toFloat() * 0.1f)
+                        val midEnergy = 0.30f + snareIntensity * 0.45f + (cos(t * 3.0 + i * 0.5).toFloat() * 0.15f)
+                        val trebleEnergy = 0.25f + hatIntensity * 0.40f + (sin(t * 8.0 + i).toFloat() * 0.1f)
 
                         val bandEnergy = when (i) {
-                            in 0..6 -> 0.45f + rhythmBass * 0.45f // Sub & Bass
-                            in 7..14 -> 0.35f + rhythmMid * 0.35f // Low-Mids
-                            in 15..23 -> 0.40f + rhythmMid * 0.40f // Mids & Presence
-                            else -> 0.30f + rhythmTreble * 0.30f // Highs & Brilliance
+                            in 0..6 -> bassEnergy // 20Hz - 80Hz
+                            in 7..14 -> 0.30f + midEnergy * 0.8f // 100Hz - 500Hz
+                            in 15..23 -> midEnergy // 630Hz - 4kHz
+                            else -> trebleEnergy // 5kHz - 20kHz
                         }
+
                         (bandEnergy * gainMultiplier * filterFactor).coerceIn(0.02f, 0.98f)
                     }
 
-                    // Ballistics: fast attack, smooth decay
-                    val clampedTarget = targetLevel.coerceIn(0.01f, 1.0f)
+                    // Ballistics: fast attack, smooth musical decay
+                    val clampedTarget = targetLevel.coerceIn(0.0f, 1.0f)
                     if (clampedTarget > currentLevels[i]) {
-                        currentLevels[i] += (clampedTarget - currentLevels[i]) * 0.65f // Fast attack
+                        currentLevels[i] += (clampedTarget - currentLevels[i]) * 0.70f // Fast attack
                     } else {
-                        currentLevels[i] += (clampedTarget - currentLevels[i]) * 0.20f // Smooth decay
+                        currentLevels[i] += (clampedTarget - currentLevels[i]) * 0.22f // Smooth decay
                     }
 
                     // Peak hold ballistics
                     if (currentLevels[i] > currentPeaks[i]) {
                         currentPeaks[i] = currentLevels[i]
-                        peakHoldCounters[i] = 12 // Hold for ~400ms
+                        peakHoldCounters[i] = 10 // Hold for ~350ms
                     } else {
                         if (peakHoldCounters[i] > 0) {
                             peakHoldCounters[i]--
                         } else {
-                            currentPeaks[i] = (currentPeaks[i] - 0.025f).coerceAtLeast(currentLevels[i])
+                            currentPeaks[i] = (currentPeaks[i] - 0.03f).coerceAtLeast(currentLevels[i])
                         }
                     }
                 }
@@ -477,22 +657,29 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
                 _spectrumLevels.value = currentLevels.toList()
                 _peakLevels.value = currentPeaks.toList()
 
-                // VU Meter calculation
-                val maxL = if (state.channelL.isMuted) -60f else {
-                    val baseEnergy = currentLevels.take(16).average().toFloat()
-                    val db = (baseEnergy * 40f - 30f + state.channelL.gainDb).coerceIn(-60f, 6f)
-                    db
-                }
-                val maxR = if (state.channelR.isMuted) -60f else {
-                    val baseEnergy = currentLevels.takeLast(16).average().toFloat()
-                    val db = (baseEnergy * 40f - 30f + state.channelR.gainDb).coerceIn(-60f, 6f)
-                    db
+                // VU Meter calculation with stereo separation and live hardware tracking
+                val dbL = if (state.channelL.isMuted) -60f else {
+                    if (isHardwareActive && lastHardwareVuL != null) {
+                        (lastHardwareVuL!! + state.channelL.gainDb).coerceIn(-60f, 6f)
+                    } else {
+                        val baseL = currentLevels.take(16).average().toFloat()
+                        (baseL * 42f - 28f + state.channelL.gainDb).coerceIn(-60f, 6f)
+                    }
                 }
 
-                _vuLevelL.value = maxL
-                _vuLevelR.value = maxR
+                val dbR = if (state.channelR.isMuted) -60f else {
+                    if (isHardwareActive && lastHardwareVuR != null) {
+                        (lastHardwareVuR!! + state.channelR.gainDb).coerceIn(-60f, 6f)
+                    } else {
+                        val baseR = currentLevels.takeLast(16).average().toFloat()
+                        (baseR * 42f - 28f + state.channelR.gainDb).coerceIn(-60f, 6f)
+                    }
+                }
 
-                delay(35) // ~28-30 FPS for buttery smooth pro audio RTA
+                _vuLevelL.value = dbL
+                _vuLevelR.value = dbR
+
+                delay(35) // ~28 FPS smooth audio RTA
             }
         }
     }
