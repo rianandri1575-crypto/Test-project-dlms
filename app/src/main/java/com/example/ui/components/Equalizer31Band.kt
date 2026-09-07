@@ -44,6 +44,7 @@ import com.example.ui.theme.TextSecondary
 
 private const val EQ_MIN_DB = -12f
 private const val EQ_MAX_DB = 12f
+private const val EQ_TRACK_HEIGHT_DP = 150
 
 @Composable
 fun Equalizer31BandView(
@@ -139,12 +140,14 @@ fun Equalizer31BandView(
                     .padding(vertical = 8.dp, horizontal = 4.dp)
             ) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.width(24.dp).height(158.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                        Text("+12", color = TextSecondary, fontSize = 8.sp)
-                        Text("0", color = TextSecondary, fontSize = 8.sp)
-                        Text("-12", color = TextSecondary, fontSize = 8.sp)
+                    // Marker labels use the exact same 150 dp coordinate space as the fader.
+                    // Therefore +12 is at the top, 0 is exactly at the center, and -12 is at the bottom.
+                    Box(Modifier.width(24.dp).height(EQ_TRACK_HEIGHT_DP.dp)) {
+                        Text("+12", color = TextSecondary, fontSize = 8.sp, modifier = Modifier.align(Alignment.TopCenter))
+                        Text("0", color = AudioCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center))
+                        Text("-12", color = TextSecondary, fontSize = 8.sp, modifier = Modifier.align(Alignment.BottomCenter))
                     }
-                    LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    LazyRow(Modifier.weight(1f).height(EQ_TRACK_HEIGHT_DP.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         itemsIndexed(ISO_31_FREQUENCIES) { index, freq ->
                             VerticalBandFader(freq, current.eqGains.getOrElse(index) { 0f }, { onBandGainChange(index, it) })
                         }
@@ -189,10 +192,10 @@ fun VerticalBandFader(frequency: Float, gainDb: Float, onGainChange: (Float) -> 
         }
         Spacer(Modifier.height(5.dp))
         Box(
-            Modifier.height(150.dp).width(36.dp).pointerInput(Unit) {
+            Modifier.height(EQ_TRACK_HEIGHT_DP.dp).width(36.dp).pointerInput(Unit) {
                 detectDragGestures(
-                    onDragStart = { p -> onGainChange(yToGain(p.y)) },
-                    onDrag = { change, _ -> onGainChange(yToGain(change.position.y)) }
+                    onDragStart = { p -> onGainChange(yToGain(p.y - 4f)) },
+                    onDrag = { change, _ -> onGainChange(yToGain(change.position.y - 4f)) }
                 )
             },
             contentAlignment = Alignment.Center
