@@ -40,8 +40,9 @@ class MainActivity : ComponentActivity() {
     private val webViewVolumeKeeper = object : Runnable {
         override fun run() {
             if (!dspActive) return
-            // Hard-mute the original WebView path. Only the processed AudioTrack should be audible.
-            setYouTubeWebViewVolume(0)
+            // Keep the original WebView path at a barely audible level so playback capture
+            // still receives signal on devices where player.setVolume(0) also mutes capture.
+            setYouTubeWebViewVolume(1)
             dspHandler.postDelayed(this, 250)
         }
     }
@@ -113,7 +114,7 @@ class MainActivity : ComponentActivity() {
         dspActive = active
         dspHandler.removeCallbacks(webViewVolumeKeeper)
         if (active) {
-            setYouTubeWebViewVolume(0)
+            setYouTubeWebViewVolume(1)
             dspHandler.post(webViewVolumeKeeper)
         } else {
             setYouTubeWebViewVolume(100)
@@ -122,7 +123,9 @@ class MainActivity : ComponentActivity() {
 
     /**
      * AudioPlaybackCapture copies the playback stream rather than replacing it.
-     * During DSP, mute the original WebView so the user hears only the processed return path.
+     * Keep the original WebView at 1% so capture remains non-zero, while the service
+     * restores the captured signal to normal level after DSP. This avoids the audible
+     * double-path that occurred when the original source was left at 100%.
      */
     private fun setYouTubeWebViewVolume(percent: Int) {
         fun visit(view: View) {
