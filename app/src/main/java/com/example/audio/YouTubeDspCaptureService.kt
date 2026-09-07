@@ -29,6 +29,7 @@ class YouTubeDspCaptureService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             stopPipeline()
+            sendBroadcast(Intent(ACTION_STOPPED).setPackage(packageName))
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf(startId)
             return START_NOT_STICKY
@@ -50,10 +51,13 @@ class YouTubeDspCaptureService : Service() {
             if (projection == null) throw IllegalStateException("MediaProjection unavailable")
             startPipeline(projection!!)
         } catch (_: SecurityException) {
+            sendBroadcast(Intent(ACTION_STOPPED).setPackage(packageName))
             stopSelf(startId)
         } catch (_: IllegalStateException) {
+            sendBroadcast(Intent(ACTION_STOPPED).setPackage(packageName))
             stopSelf(startId)
         } catch (_: Exception) {
+            sendBroadcast(Intent(ACTION_STOPPED).setPackage(packageName))
             stopSelf(startId)
         }
         return START_NOT_STICKY
@@ -75,7 +79,6 @@ class YouTubeDspCaptureService : Service() {
             .build()
         val newTrack = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder()
-                // Keep the processed return path out of the MEDIA capture filter to avoid feedback loops.
                 .setUsage(AudioAttributes.USAGE_ASSISTANT)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                 .build())
@@ -142,13 +145,19 @@ class YouTubeDspCaptureService : Service() {
             .build()
     }
 
-    override fun onDestroy() { stopPipeline(); super.onDestroy() }
+    override fun onDestroy() {
+        stopPipeline()
+        sendBroadcast(Intent(ACTION_STOPPED).setPackage(packageName))
+        super.onDestroy()
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
         const val ACTION_STOP = "com.example.audio.ACTION_STOP_YOUTUBE_DSP"
+        const val ACTION_STOPPED = "com.example.audio.ACTION_YOUTUBE_DSP_STOPPED"
         private const val NOTIFICATION_ID = 7401
         private const val RESULT_OK = -1
     }
