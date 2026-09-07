@@ -45,6 +45,8 @@ import com.example.ui.theme.TextSecondary
 private const val EQ_MIN_DB = -12f
 private const val EQ_MAX_DB = 12f
 private const val EQ_TRACK_HEIGHT_DP = 150
+private const val EQ_TRACK_TOP_PX = 15f
+private const val EQ_TRACK_BOTTOM_PX = 135f
 
 @Composable
 fun Equalizer31BandView(
@@ -140,12 +142,10 @@ fun Equalizer31BandView(
                     .padding(vertical = 8.dp, horizontal = 4.dp)
             ) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    // Marker labels use the exact same 150 dp coordinate space as the fader.
-                    // Therefore +12 is at the top, 0 is exactly at the center, and -12 is at the bottom.
                     Box(Modifier.width(24.dp).height(EQ_TRACK_HEIGHT_DP.dp)) {
-                        Text("+12", color = TextSecondary, fontSize = 8.sp, modifier = Modifier.align(Alignment.TopCenter))
+                        Text("+12", color = TextSecondary, fontSize = 8.sp, modifier = Modifier.align(Alignment.TopCenter).offset(y = (EQ_TRACK_TOP_PX / 1.0f).dp - 6.dp))
                         Text("0", color = AudioCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Center))
-                        Text("-12", color = TextSecondary, fontSize = 8.sp, modifier = Modifier.align(Alignment.BottomCenter))
+                        Text("-12", color = TextSecondary, fontSize = 8.sp, modifier = Modifier.align(Alignment.BottomCenter).offset(y = -(EQ_TRACK_HEIGHT_DP - EQ_TRACK_BOTTOM_PX).dp + 6.dp))
                     }
                     LazyRow(Modifier.weight(1f).height(EQ_TRACK_HEIGHT_DP.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         itemsIndexed(ISO_31_FREQUENCIES) { index, freq ->
@@ -177,12 +177,13 @@ fun QuickCurveChip(label: String, onClick: () -> Unit) {
 
 @Composable
 fun VerticalBandFader(frequency: Float, gainDb: Float, onGainChange: (Float) -> Unit, modifier: Modifier = Modifier) {
-    val trackHeight = 142f
+    val trackHeight = EQ_TRACK_BOTTOM_PX - EQ_TRACK_TOP_PX
     val clamped = gainDb.coerceIn(EQ_MIN_DB, EQ_MAX_DB)
-    val thumbY = ((EQ_MAX_DB - clamped) / (EQ_MAX_DB - EQ_MIN_DB) * trackHeight).coerceIn(0f, trackHeight)
+    val thumbY = EQ_TRACK_TOP_PX + ((EQ_MAX_DB - clamped) / (EQ_MAX_DB - EQ_MIN_DB) * trackHeight)
 
     fun yToGain(y: Float): Float {
-        val normalized = 1f - (y.coerceIn(0f, trackHeight) / trackHeight)
+        val position = y.coerceIn(EQ_TRACK_TOP_PX, EQ_TRACK_BOTTOM_PX)
+        val normalized = 1f - ((position - EQ_TRACK_TOP_PX) / trackHeight)
         return (EQ_MIN_DB + normalized * (EQ_MAX_DB - EQ_MIN_DB)).coerceIn(EQ_MIN_DB, EQ_MAX_DB)
     }
 
@@ -194,18 +195,18 @@ fun VerticalBandFader(frequency: Float, gainDb: Float, onGainChange: (Float) -> 
         Box(
             Modifier.height(EQ_TRACK_HEIGHT_DP.dp).width(36.dp).pointerInput(Unit) {
                 detectDragGestures(
-                    onDragStart = { p -> onGainChange(yToGain(p.y - 4f)) },
-                    onDrag = { change, _ -> onGainChange(yToGain(change.position.y - 4f)) }
+                    onDragStart = { p -> onGainChange(yToGain(p.y)) },
+                    onDrag = { change, _ -> onGainChange(yToGain(change.position.y)) }
                 )
             },
             contentAlignment = Alignment.Center
         ) {
             Canvas(Modifier.fillMaxSize()) {
                 val x = size.width / 2f
-                val top = 4f
-                val bottom = size.height - 4f
-                val y = (thumbY + 4f).coerceIn(top, bottom)
-                val center = size.height / 2f
+                val top = EQ_TRACK_TOP_PX
+                val bottom = EQ_TRACK_BOTTOM_PX
+                val y = thumbY.coerceIn(top, bottom)
+                val center = (top + bottom) / 2f
                 drawLine(RackBorder.copy(alpha=.9f), Offset(x, top), Offset(x, bottom), strokeWidth=4f)
                 drawLine(AudioCyan, Offset(x, center), Offset(x, y), strokeWidth=5f)
                 drawLine(RackBorder.copy(alpha=.9f), Offset(x-12f, center), Offset(x+12f, center), strokeWidth=1.5f)
