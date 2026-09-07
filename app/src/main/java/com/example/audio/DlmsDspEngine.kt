@@ -20,6 +20,10 @@ class DlmsDspEngine(private val sampleRate: Int = 48_000) {
 
     fun processPcm16Stereo(data: ShortArray, settings: DspSettingsStore.Snapshot) {
         configure(settings)
+        val dl = (settings.delayL * sampleRate / 1000f).toInt().coerceIn(0, maxDelaySamples)
+        val dr = (settings.delayR * sampleRate / 1000f).toInt().coerceIn(0, maxDelaySamples)
+        val gainL = 10f.pow(settings.gainL / 20f)
+        val gainR = 10f.pow(settings.gainR / 20f)
         var i = 0
         while (i + 1 < data.size) {
             var l = data[i] / 32768f
@@ -28,8 +32,6 @@ class DlmsDspEngine(private val sampleRate: Int = 48_000) {
             if (settings.muteR) r = 0f
             l = applyChain(l, eqL, hpfL, lpfL, settings.xL)
             r = applyChain(r, eqR, hpfR, lpfR, settings.xR)
-            val dl = (settings.delayL * sampleRate / 1000f).toInt().coerceIn(0, maxDelaySamples)
-            val dr = (settings.delayR * sampleRate / 1000f).toInt().coerceIn(0, maxDelaySamples)
             delayL[delayIndex] = l
             delayR[delayIndex] = r
             l = delayL[(delayIndex - dl + delayL.size) % delayL.size]
@@ -37,8 +39,8 @@ class DlmsDspEngine(private val sampleRate: Int = 48_000) {
             delayIndex = (delayIndex + 1) % delayL.size
             if (settings.phaseL) l = -l
             if (settings.phaseR) r = -r
-            l *= 10f.pow(settings.gainL / 20f)
-            r *= 10f.pow(settings.gainR / 20f)
+            l *= gainL
+            r *= gainR
             data[i] = (l.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             data[i + 1] = (r.coerceIn(-1f, 1f) * 32767f).toInt().toShort()
             i += 2
@@ -48,8 +50,8 @@ class DlmsDspEngine(private val sampleRate: Int = 48_000) {
     private fun applyChain(input: Float, eq: Array<Biquad>, highPass: Array<Biquad>, lowPass: Array<Biquad>, crossover: DspSettingsStore.CrossoverSnapshot): Float {
         var value = input
         for (filter in eq) value = filter.process(value)
-        if (crossover.hpf) for (filter in highPass) value = filter.process(value)
-        if (crossover.lpf) for (filter in lowPass) value = filter.process(value)
+        if (crossover.highPassEnabled) for (filter in highPass) value = filter.process(value)
+        if (crossover.lowPassEnabled) for (filter in lowPass) value = filter.process(value)
         return value
     }
 
@@ -58,10 +60,10 @@ class DlmsDspEngine(private val sampleRate: Int = 48_000) {
             eqL[i].setPeaking(sampleRate.toFloat(), ISO_FREQS[i], 1f, s.eqL[i])
             eqR[i].setPeaking(sampleRate.toFloat(), ISO_FREQS[i], 1f, s.eqR[i])
         }
-        configureCrossover(hpfL, s.xL.hpfFreq, true)
-        configureCrossover(hpfR, s.xR.hpfFreq, true)
-        configureCrossover(lpfL, s.xL.lpfFreq, false)
-        configureCrossover(lpfR, s.xR.lpfFreq, false)
+        configureCrossover(hpfL, s.xL.highPassFrequency, true)
+        configureCrossover(hpfR, s.xR.highPassFrequency, true)
+        configureCrossover(lpfL, s.xL.lowPassFrequency, false)
+        configureCrossover(lpfR, s.xR.lowPassFrequency, false)
     }
 
     private fun configureCrossover(chain: Array<Biquad>, freq: Float, highPass: Boolean) {
