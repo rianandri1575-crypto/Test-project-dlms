@@ -25,7 +25,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -193,7 +192,7 @@ fun VerticalBandFader(frequency: Float, gainDb: Float, onGainChange: (Float) -> 
             Modifier.height(150.dp).width(36.dp).pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = { p -> onGainChange(yToGain(p.y)) },
-                    onDrag = { change, _ -> change.consume(); onGainChange(yToGain(change.position.y)) }
+                    onDrag = { change, _ -> onGainChange(yToGain(change.position.y)) }
                 )
             },
             contentAlignment = Alignment.Center
