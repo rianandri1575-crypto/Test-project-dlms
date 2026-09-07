@@ -35,21 +35,23 @@ import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
     private var dspActive by mutableStateOf(false)
+    private var antiDoubleFallbackActive = false
     private val dspHandler = Handler(Looper.getMainLooper())
 
     // Anti-double mode: first try a real mute so the original path cannot create
     // headset echo/delay. Some Android audio paths also mute the capture copy, so
     // we automatically fall back to the minimum 1% source level after a short window.
     private val antiDoubleFallback = Runnable {
-        if (dspActive) setYouTubeWebViewVolume(1)
+        if (dspActive) {
+            antiDoubleFallbackActive = true
+            setYouTubeWebViewVolume(1)
+        }
     }
 
     private val webViewVolumeKeeper = object : Runnable {
         override fun run() {
             if (!dspActive) return
-            // Keep the source at the minimum level once fallback is needed.
-            // The processed AudioTrack remains the main audible path.
-            setYouTubeWebViewVolume(1)
+            setYouTubeWebViewVolume(if (antiDoubleFallbackActive) 1 else 0)
             dspHandler.postDelayed(this, 250)
         }
     }
@@ -121,6 +123,7 @@ class MainActivity : ComponentActivity() {
         dspActive = active
         dspHandler.removeCallbacks(webViewVolumeKeeper)
         dspHandler.removeCallbacks(antiDoubleFallback)
+        antiDoubleFallbackActive = false
         if (active) {
             // Start with a true mute to eliminate the original path immediately.
             // If capture follows the player's volume, switch to 1% automatically.
@@ -134,8 +137,8 @@ class MainActivity : ComponentActivity() {
 
     /**
      * AudioPlaybackCapture copies the playback stream rather than replacing it.
-     * Anti-double mode therefore suppresses the original WebView path as far as
-     * the device audio path permits, while preserving capture with a 1% fallback.
+     * Anti-double mode suppresses the original WebView path as far as the device
+     * audio path permits, while preserving capture with a 1% fallback.
      */
     private fun setYouTubeWebViewVolume(percent: Int) {
         fun visit(view: View) {
