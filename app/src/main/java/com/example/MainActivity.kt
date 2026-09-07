@@ -37,11 +37,18 @@ class MainActivity : ComponentActivity() {
     private var dspActive by mutableStateOf(false)
     private val dspHandler = Handler(Looper.getMainLooper())
 
+    // Anti-double mode: first try a real mute so the original path cannot create
+    // headset echo/delay. Some Android audio paths also mute the capture copy, so
+    // we automatically fall back to the minimum 1% source level after a short window.
+    private val antiDoubleFallback = Runnable {
+        if (dspActive) setYouTubeWebViewVolume(1)
+    }
+
     private val webViewVolumeKeeper = object : Runnable {
         override fun run() {
             if (!dspActive) return
-            // Keep the original WebView path at a barely audible level so playback capture
-            // still receives signal on devices where player.setVolume(0) also mutes capture.
+            // Keep the source at the minimum level once fallback is needed.
+            // The processed AudioTrack remains the main audible path.
             setYouTubeWebViewVolume(1)
             dspHandler.postDelayed(this, 250)
         }
@@ -113,8 +120,12 @@ class MainActivity : ComponentActivity() {
     private fun updateDspActive(active: Boolean) {
         dspActive = active
         dspHandler.removeCallbacks(webViewVolumeKeeper)
+        dspHandler.removeCallbacks(antiDoubleFallback)
         if (active) {
-            setYouTubeWebViewVolume(1)
+            // Start with a true mute to eliminate the original path immediately.
+            // If capture follows the player's volume, switch to 1% automatically.
+            setYouTubeWebViewVolume(0)
+            dspHandler.postDelayed(antiDoubleFallback, ANTI_DOUBLE_MUTE_MS)
             dspHandler.post(webViewVolumeKeeper)
         } else {
             setYouTubeWebViewVolume(100)
@@ -123,9 +134,8 @@ class MainActivity : ComponentActivity() {
 
     /**
      * AudioPlaybackCapture copies the playback stream rather than replacing it.
-     * Keep the original WebView at 1% so capture remains non-zero, while the service
-     * restores the captured signal to normal level after DSP. This avoids the audible
-     * double-path that occurred when the original source was left at 100%.
+     * Anti-double mode therefore suppresses the original WebView path as far as
+     * the device audio path permits, while preserving capture with a 1% fallback.
      */
     private fun setYouTubeWebViewVolume(percent: Int) {
         fun visit(view: View) {
@@ -145,9 +155,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         dspHandler.removeCallbacks(webViewVolumeKeeper)
+        dspHandler.removeCallbacks(antiDoubleFallback)
         setYouTubeWebViewVolume(100)
         runCatching { unregisterReceiver(dspStoppedReceiver) }
         super.onDestroy()
+    }
+
+    companion object {
+        private const val ANTI_DOUBLE_MUTE_MS = 300L
     }
 }
 
