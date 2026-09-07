@@ -51,12 +51,15 @@ class YouTubeDspCaptureService : Service() {
             if (projection == null) throw IllegalStateException("MediaProjection unavailable")
             startPipeline(projection!!)
         } catch (_: SecurityException) {
+            LiveAudioMetrics.setActive(false)
             sendBroadcast(Intent(ACTION_STOPPED).setPackage(packageName))
             stopSelf(startId)
         } catch (_: IllegalStateException) {
+            LiveAudioMetrics.setActive(false)
             sendBroadcast(Intent(ACTION_STOPPED).setPackage(packageName))
             stopSelf(startId)
         } catch (_: Exception) {
+            LiveAudioMetrics.setActive(false)
             sendBroadcast(Intent(ACTION_STOPPED).setPackage(packageName))
             stopSelf(startId)
         }
@@ -100,6 +103,7 @@ class YouTubeDspCaptureService : Service() {
             throw e
         }
         running = true
+        LiveAudioMetrics.setActive(true)
         worker = Thread {
             val pcm = ShortArray(bufferSize / 2)
             while (running) {
@@ -114,6 +118,8 @@ class YouTubeDspCaptureService : Service() {
                     val restored = data[i].toFloat() * SOURCE_RESTORE_GAIN
                     data[i] = restored.coerceIn(-32767f, 32767f).toInt().toShort()
                 }
+                // The meters now observe exactly the same stereo PCM that is sent to AudioTrack.
+                LiveAudioMetrics.pushPcm16Stereo(data, sampleRate)
                 try { track?.write(data, 0, data.size, AudioTrack.WRITE_BLOCKING) } catch (_: Exception) { break }
             }
         }.also { it.name = "YouTube-DLMS-DSP"; it.start() }
@@ -130,6 +136,7 @@ class YouTubeDspCaptureService : Service() {
         recorder = null; track = null
         try { projection?.stop() } catch (_: Exception) {}
         projection = null
+        LiveAudioMetrics.setActive(false)
     }
 
     private fun notification(): Notification {
