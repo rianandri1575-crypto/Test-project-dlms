@@ -48,8 +48,8 @@ class DlmsDspEngine(private val sampleRate: Int = 48_000) {
     private fun applyChain(input: Float, eq: Array<Biquad>, highPass: Array<Biquad>, lowPass: Array<Biquad>, crossover: DspSettingsStore.CrossoverSnapshot): Float {
         var value = input
         for (filter in eq) value = filter.process(value)
-        if (crossover.highPassEnabled) for (filter in highPass) value = filter.process(value)
-        if (crossover.lowPassEnabled) for (filter in lowPass) value = filter.process(value)
+        if (crossover.hpf) for (filter in highPass) value = filter.process(value)
+        if (crossover.lpf) for (filter in lowPass) value = filter.process(value)
         return value
     }
 
