@@ -17,79 +17,89 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 
-/** Experimental Android playback-capture route. It is intentionally opt-in because Android requires user consent. */
+/** Opt-in playback capture. Fails safely instead of crashing when the device denies capture. */
 class YouTubeDspCaptureService : Service() {
     private var projection: MediaProjection? = null
     private var recorder: AudioRecord? = null
     private var track: AudioTrack? = null
     private var worker: Thread? = null
-    private var running = false
+    @Volatile private var running = false
     private val dsp = DlmsDspEngine(48_000)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent == null) return START_NOT_STICKY
+        if (Build.VERSION.SDK_INT < 29 || intent == null) return START_NOT_STICKY
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-        val resultData = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java) else @Suppress("DEPRECATION") intent.getParcelableExtra(EXTRA_RESULT_DATA)
-        if (resultCode < 0 || resultData == null) return START_NOT_STICKY
+        val resultData = if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+        } else {
+            @Suppress("DEPRECATION") intent.getParcelableExtra(EXTRA_RESULT_DATA)
+        }
+        if (resultCode != RESULT_OK || resultData == null) return START_NOT_STICKY
+
         startForeground(NOTIFICATION_ID, notification())
         stopPipeline()
-        val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        projection = mgr.getMediaProjection(resultCode, resultData)
-        startPipeline()
+        try {
+            val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            projection = manager.getMediaProjection(resultCode, resultData)
+            if (projection == null) throw IllegalStateException("MediaProjection unavailable")
+            startPipeline(projection!!)
+        } catch (_: SecurityException) {
+            stopSelf(startId)
+        } catch (_: IllegalStateException) {
+            stopSelf(startId)
+        } catch (_: Exception) {
+            stopSelf(startId)
+        }
         return START_NOT_STICKY
     }
 
-    private fun startPipeline() {
-        val p = projection ?: return
+    private fun startPipeline(p: MediaProjection) {
+        val sampleRate = 48_000
         val channelMask = AudioFormat.CHANNEL_IN_STEREO
-        val min = AudioRecord.getMinBufferSize(48_000, channelMask, AudioFormat.ENCODING_PCM_16BIT)
-        if (min <= 0) return
-        val bufferSize = (min * 4).coerceAtLeast(48_000)
+        val min = AudioRecord.getMinBufferSize(sampleRate, channelMask, AudioFormat.ENCODING_PCM_16BIT)
+        if (min <= 0) throw IllegalStateException("AudioRecord buffer unavailable")
+        val bufferSize = (min * 4).coerceAtLeast(sampleRate / 10)
         val config = AudioPlaybackCaptureConfiguration.Builder(p)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-            .addMatchingUsage(AudioAttributes.USAGE_GAME)
             .build()
-        recorder = AudioRecord.Builder()
-            .setAudioFormat(AudioFormat.Builder()
-                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                .setSampleRate(48_000)
-                .setChannelMask(channelMask)
-                .build())
+        val newRecorder = AudioRecord.Builder()
+            .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(sampleRate).setChannelMask(channelMask).build())
             .setBufferSizeInBytes(bufferSize)
             .setAudioPlaybackCaptureConfig(config)
             .build()
-        track = AudioTrack.Builder()
+        val newTrack = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
+                // Keep the processed return path out of the MEDIA capture filter to avoid feedback loops.
+                .setUsage(AudioAttributes.USAGE_ASSISTANT)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                 .build())
-            .setAudioFormat(AudioFormat.Builder()
-                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                .setSampleRate(48_000)
-                .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
-                .build())
+            .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(sampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
             .setBufferSizeInBytes(bufferSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
-
-        recorder?.startRecording()
-        track?.play()
+        if (newRecorder.state != AudioRecord.STATE_INITIALIZED || newTrack.state != AudioTrack.STATE_INITIALIZED) {
+            newRecorder.release(); newTrack.release()
+            throw IllegalStateException("Audio pipeline could not be initialized")
+        }
+        recorder = newRecorder
+        track = newTrack
+        try {
+            newRecorder.startRecording()
+            newTrack.play()
+        } catch (e: Exception) {
+            stopPipeline()
+            throw e
+        }
         running = true
         worker = Thread {
             val pcm = ShortArray(bufferSize / 2)
             while (running) {
-                val n = recorder?.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING) ?: -1
-                if (n > 0) {
-                    val settings = DspSettingsStore.read(this)
-                    if (n < pcm.size) {
-                        val chunk = pcm.copyOf(n)
-                        dsp.processPcm16Stereo(chunk, settings)
-                        track?.write(chunk, 0, chunk.size)
-                    } else {
-                        dsp.processPcm16Stereo(pcm, settings)
-                        track?.write(pcm, 0, pcm.size)
-                    }
-                }
+                val r = recorder ?: break
+                val n = try { r.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING) } catch (_: Exception) { -1 }
+                if (n <= 0) continue
+                val data = if (n == pcm.size) pcm else pcm.copyOf(n)
+                dsp.processPcm16Stereo(data, DspSettingsStore.read(this))
+                try { track?.write(data, 0, data.size, AudioTrack.WRITE_BLOCKING) } catch (_: Exception) { break }
             }
         }.also { it.name = "YouTube-DLMS-DSP"; it.start() }
     }
@@ -98,36 +108,34 @@ class YouTubeDspCaptureService : Service() {
         running = false
         try { recorder?.stop() } catch (_: Exception) {}
         try { track?.pause() } catch (_: Exception) {}
-        worker?.join(250)
-        recorder?.release(); recorder = null
-        track?.release(); track = null
-        projection?.stop(); projection = null
+        try { worker?.join(250) } catch (_: Exception) {}
+        worker = null
+        try { recorder?.release() } catch (_: Exception) {}
+        try { track?.release() } catch (_: Exception) {}
+        recorder = null; track = null
+        try { projection?.stop() } catch (_: Exception) {}
+        projection = null
     }
 
     private fun notification(): Notification {
         val channelId = "youtube_dsp"
         val nm = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26) {
-            nm.createNotificationChannel(NotificationChannel(channelId, "YouTube DLMS DSP", NotificationManager.IMPORTANCE_LOW))
-        }
+        if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel(channelId, "YouTube DLMS DSP", NotificationManager.IMPORTANCE_LOW))
         return NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle("YouTube DLMS DSP")
-            .setContentText("Audio capture + DSP aktif")
+            .setContentText("Playback capture + DSP aktif")
             .setOngoing(true)
             .build()
     }
 
-    override fun onDestroy() {
-        stopPipeline()
-        super.onDestroy()
-    }
-
+    override fun onDestroy() { stopPipeline(); super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
         private const val NOTIFICATION_ID = 7401
+        private const val RESULT_OK = -1
     }
 }
