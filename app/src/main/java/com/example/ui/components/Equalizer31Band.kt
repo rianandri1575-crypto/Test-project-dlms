@@ -60,8 +60,10 @@ fun Equalizer31BandView(activeChannel: ChannelSelect, channelL: ChannelAudioSett
             }
             Spacer(Modifier.height(10.dp))
             val muted = when (activeChannel) { ChannelSelect.LEFT -> channelL.isMuted; ChannelSelect.RIGHT -> channelR.isMuted; ChannelSelect.LINKED -> channelL.isMuted && channelR.isMuted }
+            val muteContainer = if (muted) Color(0xFF8F3D4A) else RackBorder
+            val muteContent = if (muted) Color.White else TextPrimary
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color(0xFF1C1B1F)).border(1.dp, RackBorder.copy(alpha=.5f), RoundedCornerShape(18.dp)).padding(horizontal=12.dp, vertical=8.dp), verticalAlignment=Alignment.CenterVertically) {
-                Button(onClick={onToggleMute(activeChannel==ChannelSelect.LEFT)}, colors=ButtonDefaults.buttonColors(containerColor=RackBorder), shape=CircleShape, modifier=Modifier.testTag("channel_mute_button")) {
+                Button(onClick={onToggleMute(activeChannel == ChannelSelect.LEFT)}, colors=ButtonDefaults.buttonColors(containerColor=muteContainer, contentColor=muteContent), shape=CircleShape, modifier=Modifier.testTag("channel_mute_button")) {
                     Icon(if(muted) Icons.Default.VolumeMute else Icons.Default.VolumeUp, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text(if(muted) "MUTED" else "MUTE", fontWeight=FontWeight.Bold, fontSize=11.sp)
                 }
                 val gain=current.gainDb
@@ -84,7 +86,6 @@ fun Equalizer31BandView(activeChannel: ChannelSelect, channelL: ChannelAudioSett
             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color(0xFF1C1B1F)).border(1.dp,RackBorder.copy(alpha=.5f),RoundedCornerShape(18.dp)).padding(vertical=8.dp,horizontal=4.dp)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal=2.dp),verticalAlignment=Alignment.CenterVertically) {
                     Box(Modifier.width(24.dp).height(EQ_TRACK_HEIGHT_DP.dp)) {
-                        // Labels use the exact same top/center/bottom coordinates as the fader track.
                         Text("+12",color=TextSecondary,fontSize=8.sp,modifier=Modifier.align(Alignment.TopCenter).offset(y=9.dp))
                         Text("0",color=AudioCyan,fontSize=9.sp,fontWeight=FontWeight.Bold,modifier=Modifier.align(Alignment.Center))
                         Text("-12",color=TextSecondary,fontSize=8.sp,modifier=Modifier.align(Alignment.BottomCenter).offset(y=(-15).dp))
