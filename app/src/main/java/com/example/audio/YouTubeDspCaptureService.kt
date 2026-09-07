@@ -11,7 +11,7 @@ import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.AudioTrack
-import android.media.MediaProjection
+import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
@@ -29,7 +29,7 @@ class YouTubeDspCaptureService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) return START_NOT_STICKY
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-        val resultData = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
+        val resultData = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java) else @Suppress("DEPRECATION") intent.getParcelableExtra(EXTRA_RESULT_DATA)
         if (resultCode < 0 || resultData == null) return START_NOT_STICKY
         startForeground(NOTIFICATION_ID, notification())
         stopPipeline()
