@@ -17,7 +17,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 
-/** Opt-in playback capture. The UI mutes the original WebView while this processed copy is playing. */
+/** Opt-in playback capture. The UI ducks the original WebView while this processed copy is playing. */
 class YouTubeDspCaptureService : Service() {
     private var projection: MediaProjection? = null
     private var recorder: AudioRecord? = null
@@ -108,6 +108,12 @@ class YouTubeDspCaptureService : Service() {
                 if (n <= 0) continue
                 val data = if (n == pcm.size) pcm else pcm.copyOf(n)
                 dsp.processPcm16Stereo(data, DspSettingsStore.read(this))
+                // The WebView source is ducked to 1% to prevent the unprocessed copy from being audible.
+                // Restore the processed path to normal listening level after DSP.
+                for (i in data.indices) {
+                    val restored = data[i].toFloat() * SOURCE_RESTORE_GAIN
+                    data[i] = restored.coerceIn(-32767f, 32767f).toInt().toShort()
+                }
                 try { track?.write(data, 0, data.size, AudioTrack.WRITE_BLOCKING) } catch (_: Exception) { break }
             }
         }.also { it.name = "YouTube-DLMS-DSP"; it.start() }
@@ -154,6 +160,7 @@ class YouTubeDspCaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        private const val SOURCE_RESTORE_GAIN = 100f
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
         const val ACTION_STOP = "com.example.audio.ACTION_STOP_YOUTUBE_DSP"
