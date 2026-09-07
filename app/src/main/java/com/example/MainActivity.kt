@@ -47,9 +47,7 @@ class MainActivity : ComponentActivity() {
 
     private val dspStoppedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == YouTubeDspCaptureService.ACTION_STOPPED) {
-                updateDspActive(false)
-            }
+            if (intent?.action == YouTubeDspCaptureService.ACTION_STOPPED) updateDspActive(false)
         }
     }
 
@@ -64,9 +62,7 @@ class MainActivity : ComponentActivity() {
                 }
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(serviceIntent) else startService(serviceIntent)
                 updateDspActive(true)
-            }.onFailure {
-                updateDspActive(false)
-            }
+            }.onFailure { updateDspActive(false) }
         }
     }
 
@@ -84,11 +80,15 @@ class MainActivity : ComponentActivity() {
                 val vm: DlmsViewModel = viewModel()
                 Box(Modifier.fillMaxSize()) {
                     DlmsApp(viewModel = vm)
+
+                    // Kept above the footer so it never covers "Dev by Yanns45hz".
                     Button(
                         onClick = {
                             if (dspActive) stopYouTubeDsp() else requestYouTubeDspCapture()
                         },
-                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 54.dp, end = 12.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 12.dp, bottom = 58.dp),
                         content = { Text(if (dspActive) "Stop DSP" else "DSP YouTube") }
                     )
                 }
