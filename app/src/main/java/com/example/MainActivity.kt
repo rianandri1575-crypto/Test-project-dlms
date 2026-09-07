@@ -48,7 +48,7 @@ class MainActivity : ComponentActivity() {
     private val dspStoppedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == YouTubeDspCaptureService.ACTION_STOPPED) {
-                setDspActive(false)
+                updateDspActive(false)
             }
         }
     }
@@ -63,9 +63,9 @@ class MainActivity : ComponentActivity() {
                     putExtra(YouTubeDspCaptureService.EXTRA_RESULT_DATA, result.data)
                 }
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(serviceIntent) else startService(serviceIntent)
-                setDspActive(true)
+                updateDspActive(true)
             }.onFailure {
-                setDspActive(false)
+                updateDspActive(false)
             }
         }
     }
@@ -107,10 +107,10 @@ class MainActivity : ComponentActivity() {
             action = YouTubeDspCaptureService.ACTION_STOP
         }
         startService(intent)
-        setDspActive(false)
+        updateDspActive(false)
     }
 
-    private fun setDspActive(active: Boolean) {
+    private fun updateDspActive(active: Boolean) {
         dspActive = active
         dspHandler.removeCallbacks(webViewVolumeKeeper)
         if (active) {
