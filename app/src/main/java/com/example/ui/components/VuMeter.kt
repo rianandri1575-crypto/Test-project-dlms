@@ -27,13 +27,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.AudioCyan
 import com.example.ui.theme.AudioRed
-import com.example.ui.theme.MeterGreen
 import com.example.ui.theme.MeterOrange
 import com.example.ui.theme.MeterRed
 import com.example.ui.theme.MeterYellow
 import com.example.ui.theme.RackBorder
 import com.example.ui.theme.RackCard
-import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextSecondary
 
 @Composable
@@ -46,63 +44,45 @@ fun StereoVuMeter(
 ) {
     Box(
         modifier = modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
             .background(RackCard)
             .border(1.dp, RackBorder, RoundedCornerShape(20.dp))
-            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .padding(horizontal = 14.dp, vertical = 9.dp)
             .testTag("stereo_vu_meter")
     ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "STEREO OUTPUT METERS",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AudioCyan,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.8.sp,
-                    fontSize = 10.sp
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = if (isMutedL) "L: MUTE" else "L: ${if (levelDbL <= -55f) "-INF" else "%.1f".format(levelDbL)} dB",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isMutedL) AudioRed else AudioCyan,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = if (isMutedR) "R: MUTE" else "R: ${if (levelDbR <= -55f) "-INF" else "%.1f".format(levelDbR)} dB",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isMutedR) AudioRed else AudioCyan,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                Text("STEREO OUTPUT METERS", color = AudioCyan, fontWeight = FontWeight.Bold, letterSpacing = .8.sp, fontSize = 10.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MeterReadout("L", levelDbL, isMutedL)
+                    MeterReadout("R", levelDbR, isMutedR)
                 }
             }
-
-            // Channel L bar
-            VuMeterBar(
-                channelLabel = "L",
-                levelDb = levelDbL,
-                isMuted = isMutedL
-            )
-
-            // Channel R bar
-            VuMeterBar(
-                channelLabel = "R",
-                levelDb = levelDbR,
-                isMuted = isMutedR
-            )
+            VuMeterBar("L", levelDbL, isMutedL)
+            VuMeterBar("R", levelDbR, isMutedR)
+            Row(Modifier.fillMaxWidth().padding(start = 21.dp, end = 20.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                listOf("-60", "-48", "-36", "-24", "-18", "-12", "-6", "0").forEach {
+                    Text(it, color = TextSecondary.copy(alpha = .55f), fontFamily = FontFamily.Monospace, fontSize = 7.sp)
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun MeterReadout(label: String, levelDb: Float, muted: Boolean) {
+    Text(
+        text = if (muted) "$label: MUTE" else "$label: ${if (levelDb <= -59f) "-INF" else "%.1f".format(levelDb)} dB",
+        color = if (muted) AudioRed else AudioCyan,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.Bold
+    )
 }
 
 @Composable
@@ -112,58 +92,43 @@ fun VuMeterBar(
     isMuted: Boolean,
     modifier: Modifier = Modifier
 ) {
-    // Segments: -48, -36, -24, -18, -12, -9, -6, -3, 0, +3, +6 dB (11 segments)
-    val thresholds = listOf(-48f, -36f, -24f, -18f, -12f, -9f, -6f, -3f, 0f, 3f, 6f)
+    // 24-segment digital meter: -60 dBFS .. 0 dBFS, plus one clip LED.
+    val segments = 24
+    val stepDb = 2.5f
+    val visibleDb = levelDb.coerceIn(-60f, 0f)
+    val activeCount = if (isMuted) 0 else (((visibleDb + 60f) / stepDb).coerceIn(0f, segments.toFloat())).toInt()
 
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
-        Text(
-            text = channelLabel,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (isMuted) AudioRed else TextSecondary,
-            fontWeight = FontWeight.Bold,
-            fontSize = 11.sp,
-            modifier = Modifier.width(14.dp)
-        )
+        Text(channelLabel, color = if (isMuted) AudioRed else TextSecondary, fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.width(14.dp))
 
         Row(
-            modifier = Modifier
-                .weight(1f)
-                .height(10.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFF1C1B1F)),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+            Modifier.weight(1f).height(10.dp).clip(RoundedCornerShape(3.dp)).background(Color(0xFF151419)),
+            horizontalArrangement = Arrangement.spacedBy(1.5.dp)
         ) {
-            thresholds.forEach { threshold ->
-                val isActive = !isMuted && (levelDb >= threshold)
+            repeat(segments) { index ->
+                val threshold = -60f + (index + 1) * stepDb
+                val active = !isMuted && index < activeCount
                 val segmentColor = when {
-                    threshold >= 3f -> MeterRed
-                    threshold >= 0f -> MeterOrange
-                    threshold >= -9f -> MeterYellow
+                    threshold > -3f -> MeterRed
+                    threshold > -12f -> MeterOrange
+                    threshold > -24f -> MeterYellow
                     else -> AudioCyan
                 }
-
                 Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(1.5.dp))
-                        .background(if (isActive) segmentColor else segmentColor.copy(alpha = 0.12f))
+                    Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(1.dp))
+                        .background(if (active) segmentColor else segmentColor.copy(alpha = .10f))
                 )
             }
         }
 
-        // Clip LED indicator
-        val isClipping = !isMuted && levelDb >= 0f
+        val clipping = !isMuted && levelDb >= 0f
         Box(
-            modifier = Modifier
-                .width(16.dp)
-                .height(10.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(if (isClipping) MeterRed else MeterRed.copy(alpha = 0.15f))
+            Modifier.width(13.dp).height(10.dp).clip(RoundedCornerShape(3.dp))
+                .background(if (clipping) MeterRed else MeterRed.copy(alpha = .12f))
         )
     }
 }
