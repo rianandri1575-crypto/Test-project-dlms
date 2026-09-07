@@ -17,7 +17,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 
-/** Opt-in playback capture. Fails safely instead of crashing when the device denies capture. */
+/** Opt-in playback capture. The UI mutes the original WebView while this processed copy is playing. */
 class YouTubeDspCaptureService : Service() {
     private var projection: MediaProjection? = null
     private var recorder: AudioRecord? = null
@@ -27,6 +27,12 @@ class YouTubeDspCaptureService : Service() {
     private val dsp = DlmsDspEngine(48_000)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            stopPipeline()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (Build.VERSION.SDK_INT < 29 || intent == null) return START_NOT_STICKY
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
         val resultData = if (Build.VERSION.SDK_INT >= 33) {
@@ -121,11 +127,18 @@ class YouTubeDspCaptureService : Service() {
         val channelId = "youtube_dsp"
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel(channelId, "YouTube DLMS DSP", NotificationManager.IMPORTANCE_LOW))
+        val stopIntent = Intent(this, YouTubeDspCaptureService::class.java).apply { action = ACTION_STOP }
+        val stopPendingIntent = android.app.PendingIntent.getService(
+            this, 7402, stopIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                if (Build.VERSION.SDK_INT >= 23) android.app.PendingIntent.FLAG_IMMUTABLE else 0
+        )
         return NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle("YouTube DLMS DSP")
             .setContentText("Playback capture + DSP aktif")
             .setOngoing(true)
+            .addAction(android.R.drawable.ic_media_pause, "Stop DSP", stopPendingIntent)
             .build()
     }
 
@@ -135,6 +148,7 @@ class YouTubeDspCaptureService : Service() {
     companion object {
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
+        const val ACTION_STOP = "com.example.audio.ACTION_STOP_YOUTUBE_DSP"
         private const val NOTIFICATION_ID = 7401
         private const val RESULT_OK = -1
     }
