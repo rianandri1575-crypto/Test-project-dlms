@@ -61,11 +61,6 @@ android {
     includeInApk = false
     includeInBundle = true
   }
-  sourceSets {
-    getByName("debug") {
-      kotlin.srcDir("build/generated/ksp/debug/kotlin")
-    }
-  }
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
