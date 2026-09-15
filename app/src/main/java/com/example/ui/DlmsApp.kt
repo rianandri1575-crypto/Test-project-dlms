@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.CrossoverView
 import com.example.ui.components.DelayAlignView
+import com.example.ui.components.DspMasterSwitch
 import com.example.ui.components.Equalizer31BandView
 import com.example.ui.components.PresetsView
 import com.example.ui.components.RealTimeSpectrumVisualizer
@@ -195,6 +196,15 @@ fun DlmsApp(
                     levelDbR = vuLevelR,
                     isMutedL = uiState.channelL.isMuted,
                     isMutedR = uiState.channelR.isMuted
+                )
+
+                // SATU tombol DSP: benar-benar mengaktifkan pemrosesan audio
+                // saat musik sedang diputar (juga di Android rendah tanpa
+                // AudioPlaybackCapture — via generator/capture yang berbunyi).
+                DspMasterSwitch(
+                    isDspEnabled = uiState.isDspEnabled,
+                    isAudioPlaying = uiState.isYouTubePlaying || uiState.isSignalGeneratorPlaying,
+                    onToggle = { viewModel.setDspEnabled(it) }
                 )
 
                 // 3. PERSISTENT YOUTUBE PLAYER & DSP GENERATOR

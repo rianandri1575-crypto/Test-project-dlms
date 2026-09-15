@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.audio.AudioSignalGenerator
 import com.example.audio.AudioSpectrumAnalyzer
 import com.example.audio.DspSettingsStore
+import com.example.audio.LiveAudioMetrics
 import com.example.data.db.AppDatabase
 import com.example.data.db.AudioPresetEntity
 import com.example.data.model.ChannelSelect
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.absoluteValue
 import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.sin
@@ -54,7 +56,9 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch(Dispatchers.IO) { repository.ensureDefaultPresets() }
-        viewModelScope.launch(Dispatchers.Default) {
+        viewModelScope.launch(Dispatchers.IO) {
+            // Restore cache DSP sebelum audio pertama berbunyi (cold start).
+            runCatching { DspSettingsStore.preload(getApplication()) }
             _uiState.collect { DspSettingsStore.write(getApplication(), it) }
         }
         initHardwareAnalyzer(application)
@@ -82,7 +86,10 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setEqGain(bandIndex: Int, gainDb: Float) {
         if (bandIndex !in 0..30) return
-        val g = gainDb.coerceIn(-12f, 12f)
+        // Kuantisasi 0.1 dB + center-detent: sinkron dengan mapping slider
+        // VerticalBandFader sehingga tengah tepat = 0 dB & selalu tercapai.
+        val raw = (gainDb.coerceIn(-12f, 12f) * 10f).toInt() / 10f
+        val g = if (raw > -0.16f && raw < 0.16f) 0f else raw
         _uiState.update { s ->
             when (s.activeChannel) {
                 ChannelSelect.LEFT -> s.copy(channelL = s.channelL.copy(eqGains = s.channelL.eqGains.toMutableList().also { it[bandIndex] = g }))
@@ -190,8 +197,24 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
         val same = _uiState.value.signalGeneratorType == type
         if (playing && same) stopSignalGenerator()
         else {
-            signalGenerator.start(type, .4f)
+            // DSP on/off lewat SATU engine + SATU flag; generator selalu
+            // mendorong PCM aktual ke LiveAudioMetrics (lihat generator).
+            signalGenerator.start(type, .4f, _uiState.value.isDspEnabled)
             _uiState.update { it.copy(isSignalGeneratorPlaying = true, signalGeneratorType = type, isYouTubePlaying = false) }
+        }
+    }
+
+    /**
+     * SATU tombol DSP untuk semua pipeline. Saat dimatikan lalu dinyalakan
+     * saat musik sedang diputar, generator di-restart agar flag dspEnabled
+     * yang baru langsung terdengar (tanpa perlu stop manual).
+     */
+    fun setDspEnabled(enabled: Boolean) {
+        val wasPlaying = _uiState.value.isSignalGeneratorPlaying
+        val type = _uiState.value.signalGeneratorType
+        _uiState.update { it.copy(isDspEnabled = enabled) }
+        if (wasPlaying) {
+            signalGenerator.start(type, .4f, enabled)
         }
     }
 
@@ -238,11 +261,18 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
             var simStep = 0.0
             val levels = FloatArray(31)
             val peaks = FloatArray(31)
+            val peakDbL = floatArrayOf(-60f, -60f)
             val holds = IntArray(31)
             while (isActive) {
                 simStep += .04
                 val s = _uiState.value
                 val playing = s.isYouTubePlaying || s.isSignalGeneratorPlaying
+                // LiveAudioMetrics = satu-satunya sumber kebenaran untuk audio
+                // yang benar-benar berbunyi (PCM aktual pasca-DSP, bukan random).
+                val liveOn = LiveAudioMetrics.active.value
+                val liveSpectrum = LiveAudioMetrics.spectrum.value
+                val liveL = LiveAudioMetrics.leftDb.value
+                val liveR = LiveAudioMetrics.rightDb.value
                 val hw = (System.currentTimeMillis() - lastFftTimestamp) < 400 && lastHardwareFft != null
                 val fft = lastHardwareFft
                 val gains = when (s.activeChannel) {
@@ -256,7 +286,7 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
                     ChannelSelect.LINKED -> s.crossoverL
                 }
                 val gm = if (s.channelL.isMuted && s.channelR.isMuted) 0f else 10f.pow(maxOf(s.channelL.gainDb, s.channelR.gainDb) / 20f).coerceIn(.05f, 2.5f)
-                if (!playing) {
+                if (!playing && !liveOn) {
                     for (i in 0 until 31) { levels[i] *= .70f; peaks[i] *= .80f; holds[i] = 0 }
                     _spectrumLevels.value = levels.toList()
                     _peakLevels.value = peaks.toList()
@@ -271,10 +301,12 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
                     if (cross.hpfEnabled && f < cross.hpfFrequency) x -= log10(cross.hpfFrequency / f) / log10(2.0).toFloat() * cross.hpfSlope.rollOffDb
                     if (cross.lpfEnabled && f > cross.lpfFrequency) x -= log10(f / cross.lpfFrequency) / log10(2.0).toFloat() * cross.lpfSlope.rollOffDb
                     val ff = 10f.pow(x.coerceIn(-48f, 15f) / 20f)
-                    val target = if (hw && fft != null) {
-                        (fft.getOrElse(i) { 0f } * ff * gm).coerceIn(0f, 1f)
-                    } else {
-                        (.25f + .45f * sin(simStep * 4 + i).toFloat().absoluteValue) * ff * gm
+                    // Prioritas: 1) PCM aktual pasca-DSP, 2) Visualizer HW,
+                    // 3) simulasi ter-shaping EQ (hanya agar tak mati total).
+                    val target = when {
+                        liveOn -> (liveSpectrum.getOrElse(i) { 0f } * ff * gm).coerceIn(0f, 1f)
+                        hw && fft != null -> (fft.getOrElse(i) { 0f } * ff * gm).coerceIn(0f, 1f)
+                        else -> (.25f + .45f * sin(simStep * 4 + i).toFloat().absoluteValue) * ff * gm
                     }
                     val smoothing = if (target > levels[i]) 0.70f else 0.22f
                     levels[i] += (target - levels[i]) * smoothing
@@ -284,8 +316,24 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 _spectrumLevels.value = levels.toList()
                 _peakLevels.value = peaks.toList()
-                _vuLevelL.value = if (s.channelL.isMuted) -60f else ((if (hw && lastHardwareVuL != null) lastHardwareVuL!! else levels.take(16).average().toFloat() * 42f - 28f) + s.channelL.gainDb).coerceIn(-60f, 6f)
-                _vuLevelR.value = if (s.channelR.isMuted) -60f else ((if (hw && lastHardwareVuR != null) lastHardwareVuR!! else levels.takeLast(16).average().toFloat() * 42f - 28f) + s.channelR.gainDb).coerceIn(-60f, 6f)
+                // VU mengikuti PCM aktual pasca-DSP bila tersedia; attack cepat,
+                // release halus agar jarum tidak bergetar (ringan di API 24+).
+                val rawL = when {
+                    liveOn -> liveL
+                    hw && lastHardwareVuL != null -> lastHardwareVuL!!
+                    else -> levels.take(16).average().toFloat() * 42f - 28f
+                }
+                val rawR = when {
+                    liveOn -> liveR
+                    hw && lastHardwareVuR != null -> lastHardwareVuR!!
+                    else -> levels.takeLast(16).average().toFloat() * 42f - 28f
+                }
+                val targetL = if (s.channelL.isMuted) -60f else (rawL + s.channelL.gainDb).coerceIn(-60f, 6f)
+                val targetR = if (s.channelR.isMuted) -60f else (rawR + s.channelR.gainDb).coerceIn(-60f, 6f)
+                peakDbL[0] += (targetL - peakDbL[0]) * if (targetL > peakDbL[0]) 0.85f else 0.12f
+                peakDbL[1] += (targetR - peakDbL[1]) * if (targetR > peakDbL[1]) 0.85f else 0.12f
+                _vuLevelL.value = peakDbL[0]
+                _vuLevelR.value = peakDbL[1]
                 delay(35)
             }
         }

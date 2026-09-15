@@ -5,7 +5,7 @@ import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sin
 
-/** Allocation-free stereo PCM16 DSP core. */
+/** Allocation-free stereo PCM16 DSP core. Single engine used by all pipelines. */
 class DlmsDspEngine(private val sampleRate: Int = 48_000) {
     private val eqL = Array(31) { Biquad() }
     private val eqR = Array(31) { Biquad() }
@@ -17,21 +17,34 @@ class DlmsDspEngine(private val sampleRate: Int = 48_000) {
     private val delayL = FloatArray(maxDelaySamples + 1)
     private val delayR = FloatArray(maxDelaySamples + 1)
     private var delayIndex = 0
+    // Cache last snapshot signature to avoid recomputing 70 biquad coeffs per buffer.
+    // Critical for low-end devices: configure() is ~70 sin/cos/pow per buffer.
+    private var lastEqL = FloatArray(0)
+    private var lastEqR = FloatArray(0)
+    private var lastXlKey = ""
+    private var lastXrKey = ""
+    private var lastRate = 0
 
     fun processPcm16Stereo(data: ShortArray, settings: DspSettingsStore.Snapshot) {
-        configure(settings)
+        configureIfChanged(settings)
         val dl = (settings.delayL * sampleRate / 1000f).toInt().coerceIn(0, maxDelaySamples)
         val dr = (settings.delayR * sampleRate / 1000f).toInt().coerceIn(0, maxDelaySamples)
         val gainL = 10f.pow(settings.gainL / 20f)
         val gainR = 10f.pow(settings.gainR / 20f)
+        // Active crossover stages derived from the chosen slope so the audible
+        // filter matches the UI (BYPASS=0, 12dB=1 biquad, 24dB=2, 48dB=4).
+        val hpfStagesL = stagesFor(settings.xL.highPassEnabled, settings.xL.highPassSlopeDb)
+        val hpfStagesR = stagesFor(settings.xR.highPassEnabled, settings.xR.highPassSlopeDb)
+        val lpfStagesL = stagesFor(settings.xL.lowPassEnabled, settings.xL.lowPassSlopeDb)
+        val lpfStagesR = stagesFor(settings.xR.lowPassEnabled, settings.xR.lowPassSlopeDb)
         var i = 0
         while (i + 1 < data.size) {
             var l = data[i] / 32768f
             var r = data[i + 1] / 32768f
             if (settings.muteL) l = 0f
             if (settings.muteR) r = 0f
-            l = applyChain(l, eqL, hpfL, lpfL, settings.xL)
-            r = applyChain(r, eqR, hpfR, lpfR, settings.xR)
+            l = applyChain(l, eqL, hpfL, lpfL, hpfStagesL, lpfStagesL)
+            r = applyChain(r, eqR, hpfR, lpfR, hpfStagesR, lpfStagesR)
             delayL[delayIndex] = l
             delayR[delayIndex] = r
             l = delayL[(delayIndex - dl + delayL.size) % delayL.size]
@@ -47,12 +60,38 @@ class DlmsDspEngine(private val sampleRate: Int = 48_000) {
         }
     }
 
-    private fun applyChain(input: Float, eq: Array<Biquad>, highPass: Array<Biquad>, lowPass: Array<Biquad>, crossover: DspSettingsStore.CrossoverSnapshot): Float {
+    private fun configureIfChanged(s: DspSettingsStore.Snapshot) {
+        val xlKey = "${s.xL.highPassEnabled}:${s.xL.highPassFrequency}:${s.xL.highPassSlopeDb}:" +
+            "${s.xL.lowPassEnabled}:${s.xL.lowPassFrequency}:${s.xL.lowPassSlopeDb}"
+        val xrKey = "${s.xR.highPassEnabled}:${s.xR.highPassFrequency}:${s.xR.highPassSlopeDb}:" +
+            "${s.xR.lowPassEnabled}:${s.xR.lowPassFrequency}:${s.xR.lowPassSlopeDb}"
+        val eqSame = lastRate == sampleRate && lastEqL.contentEquals(s.eqL) &&
+            lastEqR.contentEquals(s.eqR) && lastXlKey == xlKey && lastXrKey == xrKey
+        if (eqSame) return
+        configure(s)
+        lastEqL = s.eqL.copyOf()
+        lastEqR = s.eqR.copyOf()
+        lastXlKey = xlKey
+        lastXrKey = xrKey
+        lastRate = sampleRate
+    }
+
+    private fun applyChain(input: Float, eq: Array<Biquad>, highPass: Array<Biquad>, lowPass: Array<Biquad>, hpfStages: Int, lpfStages: Int): Float {
         var value = input
         for (filter in eq) value = filter.process(value)
-        if (crossover.highPassEnabled) for (filter in highPass) value = filter.process(value)
-        if (crossover.lowPassEnabled) for (filter in lowPass) value = filter.process(value)
+        for (k in 0 until hpfStages.coerceIn(0, highPass.size)) value = highPass[k].process(value)
+        for (k in 0 until lpfStages.coerceIn(0, lowPass.size)) value = lowPass[k].process(value)
         return value
+    }
+
+    private fun stagesFor(enabled: Boolean, slopeDb: Float): Int {
+        if (!enabled) return 0
+        return when {
+            slopeDb >= 48f -> 4
+            slopeDb >= 24f -> 2
+            slopeDb > 0f -> 1
+            else -> 0
+        }
     }
 
     private fun configure(s: DspSettingsStore.Snapshot) {

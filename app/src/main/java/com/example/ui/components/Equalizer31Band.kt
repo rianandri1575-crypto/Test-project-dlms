@@ -46,6 +46,16 @@ private const val EQ_MIN_DB = -12f
 private const val EQ_MAX_DB = 12f
 private const val EQ_TRACK_HEIGHT_DP = 150
 
+/**
+ * Kuantisasi fader ke 0.1 dB + center-detent: nilai dalam ±0.15 dB dari 0
+ * dijepit ke TEPAT 0 dB sehingga posisi tengah selalu bisa dicapai dan
+ * sinkron dengan nilai DSP (DSP memakai float yang sama).
+ */
+internal fun Float.snapFaderToCenter(): Float {
+    val q = (this * 10f).toInt() / 10f
+    return if (q > -0.16f && q < 0.16f) 0f else q
+}
+
 @Composable
 fun Equalizer31BandView(
     activeChannel: ChannelSelect,
@@ -191,24 +201,28 @@ fun VerticalBandFader(
     onGainChange: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val trackHeight = EQ_TRACK_HEIGHT_DP.toFloat()
-    val clamped = gainDb.coerceIn(EQ_MIN_DB, EQ_MAX_DB)
-    val thumbY = ((EQ_MAX_DB - clamped) / (EQ_MAX_DB - EQ_MIN_DB) * trackHeight).coerceIn(0f, trackHeight)
+    // Slider dan DSP HARUS sinkron: gain dibulatkan ke 0.1 dB supaya posisi
+    // tengah (0 dB) benar-benar bisa dicapai, dan snap saat dekat 0 dB.
+    val clamped = gainDb.coerceIn(EQ_MIN_DB, EQ_MAX_DB).snapFaderToCenter()
+    val thumbY = ((EQ_MAX_DB - clamped) / (EQ_MAX_DB - EQ_MIN_DB) * EQ_TRACK_HEIGHT_DP.toFloat())
+        .coerceIn(0f, EQ_TRACK_HEIGHT_DP.toFloat())
 
     fun yToGain(y: Float): Float {
-        val position = y.coerceIn(0f, trackHeight)
-        val normalized = 1f - (position / trackHeight)
-        return (EQ_MIN_DB + normalized * (EQ_MAX_DB - EQ_MIN_DB)).coerceIn(EQ_MIN_DB, EQ_MAX_DB)
+        val position = y.coerceIn(0f, EQ_TRACK_HEIGHT_DP.toFloat())
+        val normalized = 1f - (position / EQ_TRACK_HEIGHT_DP.toFloat())
+        return (EQ_MIN_DB + normalized * (EQ_MAX_DB - EQ_MIN_DB))
+            .coerceIn(EQ_MIN_DB, EQ_MAX_DB).snapFaderToCenter()
     }
 
     Column(
         modifier = modifier.width(42.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Value is deliberately below the fader, so it cannot be confused with the +12/0/-12 scale.
+        // Double-tap badge = reset cepat ke 0 dB (posisi tengah yang tepat).
         Box(
             Modifier.height(22.dp).clip(RoundedCornerShape(6.dp))
                 .background(if (clamped != 0f) AudioCyan.copy(alpha=.25f) else RackBorder.copy(alpha=.5f))
+                .clickable { onGainChange(0f) }
                 .padding(horizontal=4.dp, vertical=2.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -236,17 +250,26 @@ fun VerticalBandFader(
                 val top = 0f
                 val bottom = size.height
                 val y = thumbY.coerceIn(top, bottom)
+                // Tengah yang TEPAT = setengah tinggi canvas (0 dB = 12/24 travel).
                 val center = size.height / 2f
 
+                // Rel + detent tengah yang tegas agar 0 dB terlihat & terasa.
                 drawLine(RackBorder.copy(alpha=.9f), Offset(x, top), Offset(x, bottom), strokeWidth=4f)
-                drawLine(AudioCyan, Offset(x, center), Offset(x, y), strokeWidth=5f)
-                drawLine(RackBorder.copy(alpha=.9f), Offset(x-12f, center), Offset(x+12f, center), strokeWidth=1.5f)
+                drawLine(
+                    if (clamped == 0f) TextSecondary else AudioCyan,
+                    Offset(x, center), Offset(x, y), strokeWidth=5f
+                )
+                drawLine(Color.White.copy(alpha=.35f), Offset(x-12f, center), Offset(x+12f, center), strokeWidth=2f)
                 drawRoundRect(
                     if (clamped == 0f) TextSecondary else AudioCyan,
                     Offset(x-7f, (y-15f).coerceAtLeast(-1f)),
                     Size(14f, 30f),
                     CornerRadius(5f,5f)
                 )
+                // Highlight cap atas thumb saat persis di 0 dB.
+                if (clamped == 0f) {
+                    drawLine(Color.White.copy(alpha=.8f), Offset(x-7f, y-13f), Offset(x+7f, y-13f), strokeWidth=1.5f)
+                }
             }
         }
         Spacer(Modifier.height(4.dp))

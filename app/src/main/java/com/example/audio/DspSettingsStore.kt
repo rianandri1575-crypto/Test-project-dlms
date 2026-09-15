@@ -11,23 +11,83 @@ object DspSettingsStore {
     private const val PREFS = "youtube_dsp_runtime"
     private const val KEY_SETTINGS = "settings"
 
+    /** In-memory cache so the realtime audio thread never does disk I/O per buffer. */
+    @Volatile private var cached: Snapshot = Snapshot.default()
+
+    /**
+     * SATU saklar DSP global. true = semua pipeline yang berbunyi WAJIB lewat
+     * [DspEngineHolder.engine]; false = bypass murni (meter tetap jalan).
+     * Default ON agar tombol DSP benar-benar mengaktifkan pemrosesan audio
+     * saat musik diputar, juga di Android rendah (API 24-28) tanpa capture.
+     */
+    @Volatile var dspEnabled: Boolean = true
+
+    /** Realtime-safe snapshot for the audio thread (no disk I/O, no Context). */
+    fun readCached(): Snapshot = cached
+
+    fun publish(snapshot: Snapshot) {
+        cached = snapshot
+    }
+
+    /** Realtime-safe: efektif FLAT (bypass) saat saklar DSP mati. */
+    fun readCachedEffective(): Snapshot =
+        if (dspEnabled) cached else Snapshot.default()
+
+    fun snapshotFromState(state: DlmsUiState): Snapshot = Snapshot(
+        eqL = state.channelL.eqGains.toFloatArray(),
+        eqR = state.channelR.eqGains.toFloatArray(),
+        gainL = state.channelL.gainDb,
+        gainR = state.channelR.gainDb,
+        muteL = state.channelL.isMuted,
+        muteR = state.channelR.isMuted,
+        phaseL = state.channelL.isPhaseInverted,
+        phaseR = state.channelR.isPhaseInverted,
+        delayL = state.channelL.delayMs,
+        delayR = state.channelR.delayMs,
+        xL = snapshotOf(state.crossoverL),
+        xR = snapshotOf(state.crossoverR),
+    )
+
+    private fun snapshotOf(c: CrossoverSettings): CrossoverSnapshot = CrossoverSnapshot(
+        highPassEnabled = c.hpfEnabled,
+        highPassFrequency = c.hpfFrequency,
+        highPassSlopeDb = c.hpfSlope.rollOffDb,
+        lowPassEnabled = c.lpfEnabled,
+        lowPassFrequency = c.lpfFrequency,
+        lowPassSlopeDb = c.lpfSlope.rollOffDb,
+    )
+
     fun write(context: Context, state: DlmsUiState) {
-        val json = JSONObject()
-        json.put("eqL", JSONArray(state.channelL.eqGains))
-        json.put("eqR", JSONArray(state.channelR.eqGains))
-        putChannel(json, "l", state.channelL)
-        putChannel(json, "r", state.channelR)
-        putCrossover(json, "xL", state.crossoverL)
-        putCrossover(json, "xR", state.crossoverR)
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_SETTINGS, json.toString()).apply()
+        publish(snapshotFromState(state))
+        // Sinkron SATU flag DSP agar thread audio langsung merasakan toggle.
+        dspEnabled = state.isDspEnabled
+        persist(context, state)
+    }
+
+    private fun persist(context: Context, state: DlmsUiState) {
+        try {
+            val json = JSONObject()
+            json.put("eqL", JSONArray(state.channelL.eqGains))
+            json.put("eqR", JSONArray(state.channelR.eqGains))
+            putChannel(json, "l", state.channelL)
+            putChannel(json, "r", state.channelR)
+            putCrossover(json, "xL", state.crossoverL)
+            putCrossover(json, "xR", state.crossoverR)
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putString(KEY_SETTINGS, json.toString()).apply()
+        } catch (_: Exception) {
+        }
     }
 
     fun read(context: Context): Snapshot {
-        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_SETTINGS, null) ?: return Snapshot.default()
+        val raw = try {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_SETTINGS, null)
+        } catch (_: Exception) { null } ?: return Snapshot.default()
         return try {
             val j = JSONObject(raw)
             Snapshot(
-                eqL = readArray(j.optJSONArray("eqL")), eqR = readArray(j.optJSONArray("eqR")),
+                eqL = readArray(j.optJSONArray("eqL")),
+                eqR = readArray(j.optJSONArray("eqR")),
                 gainL = j.optJSONObject("l")?.optDouble("gain", 0.0)?.toFloat() ?: 0f,
                 gainR = j.optJSONObject("r")?.optDouble("gain", 0.0)?.toFloat() ?: 0f,
                 muteL = j.optJSONObject("l")?.optBoolean("mute", false) ?: false,
@@ -36,9 +96,15 @@ object DspSettingsStore {
                 phaseR = j.optJSONObject("r")?.optBoolean("phase", false) ?: false,
                 delayL = j.optJSONObject("l")?.optDouble("delay", 0.0)?.toFloat() ?: 0f,
                 delayR = j.optJSONObject("r")?.optDouble("delay", 0.0)?.toFloat() ?: 0f,
-                xL = readCrossover(j.optJSONObject("xL")), xR = readCrossover(j.optJSONObject("xR"))
+                xL = readCrossover(j.optJSONObject("xL")),
+                xR = readCrossover(j.optJSONObject("xR"))
             )
         } catch (_: Exception) { Snapshot.default() }
+    }
+
+    /** Load persisted settings into the realtime cache (call once at startup). */
+    fun preload(context: Context) {
+        try { cached = read(context) } catch (_: Exception) { }
     }
 
     private fun putChannel(j: JSONObject, key: String, c: ChannelAudioSettings) {

@@ -24,7 +24,8 @@ class YouTubeDspCaptureService : Service() {
     private var track: AudioTrack? = null
     private var worker: Thread? = null
     @Volatile private var running = false
-    private val dsp = DlmsDspEngine(48_000)
+    // SATU engine untuk semua pipeline — jangan buat instance DlmsDspEngine lain.
+    private val dsp = DspEngineHolder.engine
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
@@ -111,7 +112,12 @@ class YouTubeDspCaptureService : Service() {
                 val n = try { r.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING) } catch (_: Exception) { -1 }
                 if (n <= 0) continue
                 val data = if (n == pcm.size) pcm else pcm.copyOf(n)
-                dsp.processPcm16Stereo(data, DspSettingsStore.read(this))
+                // Realtime-safe: never touch SharedPreferences on the audio thread.
+                // ViewModel publishes every UI change into this cache; low-end
+                // devices would underrun if we did disk I/O per buffer.
+                // SATU saklar DSP: bypass = FLAT agar toggle saat musik sedang
+                // diputar langsung terdengar di semua Android (termasuk rendah).
+                dsp.processPcm16Stereo(data, DspSettingsStore.readCachedEffective())
                 // The WebView source is ducked to 1% to prevent the unprocessed copy from being audible.
                 // Restore the processed path to normal listening level after DSP.
                 for (i in data.indices) {

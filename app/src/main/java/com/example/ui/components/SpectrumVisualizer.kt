@@ -64,10 +64,14 @@ fun RealTimeSpectrumVisualizer(
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
+    // PCM aktual pasca-DSP (LiveAudioMetrics) = satu-satunya sumber kebenaran;
+    // fallback ke level ViewModel (yang juga dari PCM aktual bila ada) agar
+    // tak pernah random/fake. Ringan: tanpa animasi tambahan, cukup Canvas.
     val liveActive by LiveAudioMetrics.active.collectAsState()
     val liveLevels by LiveAudioMetrics.spectrum.collectAsState()
-    val displayLevels = if (liveActive) liveLevels else levels
-    val displayPeaks = if (liveActive) liveLevels else peakLevels
+    val useLive = liveActive && liveLevels.any { it > 0.001f }
+    val displayLevels = if (useLive) liveLevels else levels
+    val displayPeaks = if (useLive) liveLevels else peakLevels
 
     Box(
         modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(HighDensityCard)
@@ -110,7 +114,13 @@ fun RealTimeSpectrumVisualizer(
                         val peak = displayPeaks.getOrElse(i) { value }.coerceIn(value, 1f)
                         val x = i * (barWidth + gap)
                         val barH = (h * value).coerceIn(0f, h)
-                        if (barH > .5f) drawRoundRect(HighDensityLavender.copy(alpha = .82f), Offset(x, h - barH), Size(barWidth, barH), CornerRadius(2f, 2f))
+                        // Modern gradient-ish look tanpa shader mahal: body +
+                        // hot tip (ringan untuk Android rendah).
+                        if (barH > .5f) {
+                            drawRoundRect(HighDensityLavender.copy(alpha = .30f), Offset(x, h - barH), Size(barWidth, barH), CornerRadius(2f, 2f))
+                            val hotH = (barH * .35f).coerceAtLeast(1.5f)
+                            drawRoundRect(HighDensityLavender, Offset(x, h - hotH), Size(barWidth, hotH), CornerRadius(2f, 2f))
+                        }
                         drawLine(HighDensityLavender, Offset(x, h - h * peak), Offset(x + barWidth, h - h * peak), 1.5f, cap = StrokeCap.Round)
                     }
                     val curve = Path()

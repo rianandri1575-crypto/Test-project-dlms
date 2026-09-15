@@ -69,7 +69,16 @@ data class DlmsUiState(
     val signalGeneratorType: SignalType = SignalType.SINE_1KHZ,
     val currentYouTubeVideoId: String = "5qap5aO4i9A", // Default Lofi/Chill audio test stream
     val currentYouTubeTitle: String = "Lofi Hip Hop Radio - Beats to relax/study to",
-    val isYouTubePlaying: Boolean = false
+    val isYouTubePlaying: Boolean = false,
+    /**
+     * SATU saklar DSP untuk semua pipeline. true = semua audio yang berbunyi
+     * lewat [com.example.audio.DspEngineHolder.engine]; false = bypass murni
+     * (metering tetap jalan agar VU/spectrum tidak mati).
+     * Default ON agar tombol DSP benar-benar mengaktifkan pemrosesan saat
+     * musik diputar, termasuk fallback software di Android rendah (API 24-28)
+     * yang tidak mendukung AudioPlaybackCapture.
+     */
+    val isDspEnabled: Boolean = true
 )
 
 enum class SignalType(val label: String) {

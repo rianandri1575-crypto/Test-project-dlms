@@ -124,6 +124,14 @@ class MainActivity : ComponentActivity() {
         dspHandler.removeCallbacks(webViewVolumeKeeper)
         dspHandler.removeCallbacks(antiDoubleFallback)
         antiDoubleFallbackActive = false
+        // Sinkron SATU saklar DSP: capture path mengikuti tombol DSP yang sama
+        // dengan generator path (lihat DlmsViewModel.setDspEnabled).
+        runCatching {
+            val vm = runCatching {
+                androidx.lifecycle.ViewModelProvider(this)[com.example.ui.DlmsViewModel::class.java]
+            }.getOrNull()
+            vm?.setDspEnabled(active)
+        }
         if (active) {
             // Start with a true mute to eliminate the original path immediately.
             // If capture follows the player's volume, switch to 1% automatically.

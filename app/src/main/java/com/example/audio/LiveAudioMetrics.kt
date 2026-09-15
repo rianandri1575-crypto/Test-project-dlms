@@ -62,8 +62,8 @@ object LiveAudioMetrics {
             imag[i] = 0.0
         }
 
-        _leftDb.value = rmsToDb(sqrt(sumL / frames))
-        _rightDb.value = rmsToDb(sqrt(sumR / frames))
+        _leftDb.value = smoothDb(_leftDb.value, rmsToDb(sqrt(sumL / frames)))
+        _rightDb.value = smoothDb(_rightDb.value, rmsToDb(sqrt(sumR / frames)))
 
         fft(real, imag)
         val binHz = sampleRate.toDouble() / FFT_SIZE
@@ -96,6 +96,13 @@ object LiveAudioMetrics {
 
     private fun rmsToDb(rms: Double): Float =
         (20.0 * log10(rms.coerceAtLeast(1e-7))).toFloat().coerceIn(MIN_DB, 0f)
+
+    /**
+     * Ballistik meter ala VU analog: attack cepat (~85%), release lambat
+     * (~12%) agar responsif tapi halus; murah di CPU (tanpa alokasi).
+     */
+    private fun smoothDb(old: Float, target: Float): Float =
+        old + (target - old) * if (target > old) 0.85f else 0.12f
 
     private fun fft(re: DoubleArray, im: DoubleArray) {
         var j = 0

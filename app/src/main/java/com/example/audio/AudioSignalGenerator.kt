@@ -14,19 +14,33 @@ import kotlin.math.PI
 import kotlin.math.pow
 import kotlin.math.sin
 
+/**
+ * Generator nada uji (sine / pink noise / sweep). Output-nya dirutekan lewat
+ * SATU [DspEngineHolder.engine] + [LiveAudioMetrics] sehingga tombol DSP,
+ * VU meter, dan spectrum selalu merefleksikan audio yang benar-benar berbunyi.
+ */
 class AudioSignalGenerator {
 
     private var audioTrack: AudioTrack? = null
     private var generatorJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Default)
-    private val sampleRate = 44100
+    // 48 kHz agar cocok dengan engine DSP + pipeline capture, tanpa resampling.
+    private val sampleRate = 48_000
     private val random = Random()
+    // SATU engine untuk semua pipeline — jangan pernah instantiate DlmsDspEngine lain.
+    private val dsp = DspEngineHolder.engine
 
     @Volatile
     var isRunning = false
         private set
 
-    fun start(type: SignalType, gainLinear: Float = 0.5f) {
+    /**
+     * @param dspEnabled true = proses via engine DSP + dorong ke LiveAudioMetrics.
+     * false = bypass murni (tetap dorong metering agar VU/spectrum hidup).
+     * Default mengikuti SATU saklar global [DspSettingsStore.dspEnabled] agar
+     * tombol DSP langsung terdengar tanpa argumen manual.
+     */
+    fun start(type: SignalType, gainLinear: Float = 0.5f, dspEnabled: Boolean = DspSettingsStore.dspEnabled) {
         stop()
         isRunning = true
 
@@ -114,6 +128,17 @@ class AudioSignalGenerator {
                     chunk[i + 1] = shortVal // Right
                 }
 
+                // Tombol DSP harus benar-benar terdengar: pakai SATU engine yang
+                // sama dengan pipeline capture; metering memakai PCM yang sama
+                // persis dengan yang dikirim ke AudioTrack (bukan fake/random).
+                // Cek ulang flag global per-chunk agar toggle saat musik sedang
+                // diputar langsung terdengar (penting di Android rendah).
+                if (dspEnabled && DspSettingsStore.dspEnabled) {
+                    dsp.processPcm16Stereo(chunk, DspSettingsStore.readCached())
+                }
+                LiveAudioMetrics.setActive(true)
+                LiveAudioMetrics.pushPcm16Stereo(chunk, sampleRate)
+
                 try {
                     track.write(chunk, 0, chunk.size)
                 } catch (_: Exception) {
@@ -127,6 +152,7 @@ class AudioSignalGenerator {
         isRunning = false
         generatorJob?.cancel()
         generatorJob = null
+        LiveAudioMetrics.setActive(false)
         try {
             audioTrack?.pause()
             audioTrack?.flush()
