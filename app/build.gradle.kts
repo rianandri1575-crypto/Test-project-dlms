@@ -3,7 +3,6 @@ import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesS
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
-  alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
@@ -135,7 +134,12 @@ dependencies {
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
-  "ksp"(libs.androidx.room.compiler)
+  // Room via javac annotationProcessor (bukan KSP): KSP (termasuk KSP2 2.3.x)
+  // mendaftarkan build/generated/ksp/debug/kotlin|java via kotlin.sourceSets
+  // yang ditolak AGP 9 built-in Kotlin ("Use android.sourceSets DSL instead").
+  // Room 2.7.0 mendukung penuh annotation processing javac sehingga tidak ada
+  // codegen yang hilang; ini satu-satunya processor di project ini.
+  annotationProcessor(libs.androidx.room.compiler)
   // Moshi codegen 1.15.2 sengaja TIDAK dipakai sebagai KSP processor: versi ini
   // predates KSP2 dan mendaftarkan build/generated/ksp/*/kotlin|java via
   // kotlin.sourceSets (KSP1) yang ditolak AGP 9 built-in Kotlin. Tidak ada
