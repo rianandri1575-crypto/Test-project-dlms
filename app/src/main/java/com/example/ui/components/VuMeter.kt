@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.pow
 import com.example.ui.theme.AudioCyan
 import com.example.ui.theme.AudioRed
 import com.example.ui.theme.MeterOrange
@@ -189,8 +190,11 @@ fun SignalPresenceMeter(
         Spacer(Modifier.width(13.dp))
     }
     Row(Modifier.fillMaxWidth().padding(start = 22.dp), horizontalArrangement = Arrangement.Start) {
+        val sigLabel = if (isMuted) "SIG: MUTED"
+            else if (peak <= -59f) "SIG: ${status.first}"
+            else "SIG: ${status.first} (${"%.0f".format(peak)} dB)"
         Text(
-            if (isMuted) "SIG: MUTED" else "SIG: ${status.first} ${if (peak <= -59f) "" else "(${\"%.0f\".format(peak)} dB)"}",
+            sigLabel,
             color = status.second, fontFamily = FontFamily.Monospace, fontSize = 8.sp, fontWeight = FontWeight.Bold
         )
     }
