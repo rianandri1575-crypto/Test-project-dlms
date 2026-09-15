@@ -136,5 +136,9 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
+  // Moshi codegen 1.15.2 sengaja TIDAK dipakai sebagai KSP processor: versi ini
+  // predates KSP2 dan mendaftarkan build/generated/ksp/*/kotlin|java via
+  // kotlin.sourceSets (KSP1) yang ditolak AGP 9 built-in Kotlin. Tidak ada
+  // @JsonClass di codebase sehingga tidak ada adapter yang hilang; Moshi
+  // runtime (reflection) tetap tersedia via libs.moshi.kotlin.
 }
